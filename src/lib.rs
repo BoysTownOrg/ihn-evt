@@ -113,9 +113,112 @@ fn parse_trigger_line(line: &str) -> Result<Trigger, ContextualError> {
     })
 }
 
+pub fn find_trials<S, Q, T>(triggers: &[Trigger], is_stimulus: Q, to_stimulus: T) -> Vec<Trial<S>>
+where
+    Q: Fn(&Trigger) -> bool,
+    T: Fn(&Trigger) -> S,
+{
+    let triggers = remove_duplicate_triggers(triggers);
+    find_stimulus_indices(&triggers, is_stimulus)
+        .windows(2)
+        .map(|stimulus_bounds| {
+            triggers_to_trial(
+                &triggers[stimulus_bounds[0]..stimulus_bounds[1]],
+                &to_stimulus,
+            )
+        })
+        .collect()
+}
+
+fn remove_duplicate_triggers(triggers: &[Trigger]) -> Vec<Trigger> {
+    triggers
+        .iter()
+        .take(1)
+        .chain(
+            triggers
+                .windows(2)
+                .enumerate()
+                .filter(|(_, window)| {
+                    let first = &window[0];
+                    let second = &window[1];
+                    first.code != second.code
+                        || second.time_microseconds - first.time_microseconds > 1024
+                })
+                .map(|(index, _)| &triggers[index + 1]),
+        )
+        .cloned()
+        .collect()
+}
+
+fn find_stimulus_indices<T>(triggers: &[Trigger], is_stimulus: T) -> Vec<usize>
+where
+    T: Fn(&Trigger) -> bool,
+{
+    triggers
+        .into_iter()
+        .enumerate()
+        .filter(|(_, event)| is_stimulus(event))
+        .map(|(index, _)| index)
+        .chain([triggers.len()].into_iter())
+        .collect()
+}
+
+fn triggers_to_trial<T, S>(triggers: &[Trigger], to_stimulus: T) -> Trial<S>
+where
+    T: Fn(&Trigger) -> S,
+{
+    let stimulus_trigger = &triggers[0];
+    let stimulus = to_stimulus(stimulus_trigger);
+    let stimulus_onset_microseconds = stimulus_trigger.time_microseconds;
+    let response = if let Some(response_index) = response_index(triggers) {
+        Some(Response {
+            choice: if has_bit_set(triggers[response_index].code, BUTTON1BIT)
+                && has_bit_set(triggers[response_index].code, BUTTON2BIT)
+            {
+                Choice::Ambiguous
+            } else if has_bit_set(triggers[response_index].code, BUTTON1BIT) {
+                Choice::Clearly(Button::One)
+            } else if has_bit_set(triggers[response_index].code, BUTTON2BIT) {
+                Choice::Clearly(Button::Two)
+            } else {
+                panic!("Can't get here!")
+            },
+            time_microseconds: triggers[response_index].time_microseconds,
+        })
+    } else {
+        None
+    };
+
+    Trial {
+        stimulus,
+        stimulus_onset_microseconds,
+        response,
+    }
+}
+
+const BUTTON1BIT: usize = 8;
+const BUTTON2BIT: usize = 9;
+
+fn response_index(triggers: &[Trigger]) -> Option<usize> {
+    triggers.into_iter().position(|trigger| {
+        let button1_mask = 1 << BUTTON1BIT;
+        let button2_mask = 1 << BUTTON2BIT;
+        trigger.code & (button1_mask | button2_mask) != 0
+    })
+}
+
+fn has_bit_set(x: i32, n: usize) -> bool {
+    x & (1 << n) == (1 << n)
+}
+
 #[cfg(test)]
 mod tests {
+    use super::find_trials;
     use super::parse_triggers;
+    use super::Button;
+    use super::Choice;
+    use super::Response;
+    use super::Trial;
     use super::Trigger;
 
     #[test]
@@ -161,5 +264,67 @@ Someone put something unexpected on this line
             "on line 2: unable to parse trigger number (TriNo) as integer",
             format!("{}", triggers.err().unwrap())
         );
+    }
+
+    #[test]
+    fn finds_two_trials_with_almost_late_response() {
+        assert_eq!(
+            vec![
+                Trial {
+                    stimulus: "hello".to_string(),
+                    stimulus_onset_microseconds: 373920000,
+                    response: Some(Response {
+                        time_microseconds: 376340992,
+                        choice: Choice::Clearly(Button::Two)
+                    })
+                },
+                Trial {
+                    stimulus: "hello".to_string(),
+                    stimulus_onset_microseconds: 377353984,
+                    response: Some(Response {
+                        time_microseconds: 378139008,
+                        choice: Choice::Clearly(Button::One)
+                    })
+                }
+            ],
+            find_trials(
+                &[
+                    Trigger {
+                        time_microseconds: 372508992,
+                        code: 60
+                    },
+                    Trigger {
+                        time_microseconds: 372521984,
+                        code: 4096
+                    },
+                    Trigger {
+                        time_microseconds: 373920000,
+                        code: 42
+                    },
+                    Trigger {
+                        time_microseconds: 375921984,
+                        code: 60
+                    },
+                    Trigger {
+                        time_microseconds: 375932000,
+                        code: 4156
+                    },
+                    Trigger {
+                        time_microseconds: 376340992,
+                        code: 512
+                    },
+                    Trigger {
+                        time_microseconds: 377353984,
+                        code: 42
+                    },
+                    Trigger {
+                        time_microseconds: 378139008,
+                        code: 256
+                    },
+                ],
+                |trigger| trigger.code == 42,
+                |_| "hello".to_string()
+            )
+        )
     }
 }
