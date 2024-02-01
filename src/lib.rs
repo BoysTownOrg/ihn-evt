@@ -37,15 +37,9 @@ pub struct ReactionTime {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum Evaluation {
+pub enum Behavior {
     Correct(ReactionTime),
     Incorrect,
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub struct Behavior<S> {
-    pub stimulus: S,
-    pub evaluation: Evaluation,
 }
 
 #[derive(Debug)]
@@ -211,12 +205,37 @@ fn has_bit_set(x: i32, n: usize) -> bool {
     x & (1 << n) == (1 << n)
 }
 
+pub fn trials_to_behavior<S, Q, T: Iterator<Item = Trial<S>>>(
+    trials: T,
+    button_is_correct: Q,
+) -> impl Iterator<Item = Behavior>
+where
+    Q: Fn(&Button, &S) -> bool,
+{
+    trials.map(move |trial| {
+        if let Some(response) = &trial.response {
+            if let Choice::Clearly(button) = &response.choice {
+                if button_is_correct(button, &trial.stimulus) {
+                    return Behavior::Correct(ReactionTime {
+                        microseconds: response.time_microseconds
+                            - trial.stimulus_onset_microseconds,
+                    });
+                }
+            }
+        }
+        Behavior::Incorrect
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::find_trials;
     use super::parse_triggers;
+    use super::trials_to_behavior;
+    use super::Behavior;
     use super::Button;
     use super::Choice;
+    use super::ReactionTime;
     use super::Response;
     use super::Trial;
     use super::Trigger;
@@ -325,6 +344,61 @@ Someone put something unexpected on this line
                 |trigger| trigger.code == 42,
                 |_| "hello".to_string()
             )
+        )
+    }
+
+    #[test]
+    fn behavior() {
+        assert_eq!(
+            vec![
+                Behavior::Correct(ReactionTime {
+                    microseconds: 376340992 - 373920000
+                }),
+                Behavior::Incorrect,
+                Behavior::Incorrect,
+                Behavior::Correct(ReactionTime {
+                    microseconds: 35 - 12
+                }),
+            ],
+            trials_to_behavior(
+                [
+                    Trial {
+                        stimulus: 1,
+                        stimulus_onset_microseconds: 373920000,
+                        response: Some(Response {
+                            time_microseconds: 376340992,
+                            choice: Choice::Clearly(Button::One)
+                        })
+                    },
+                    Trial {
+                        stimulus: 1,
+                        stimulus_onset_microseconds: 377353984,
+                        response: Some(Response {
+                            time_microseconds: 378139008,
+                            choice: Choice::Clearly(Button::Two)
+                        })
+                    },
+                    Trial {
+                        stimulus: 2,
+                        stimulus_onset_microseconds: 88,
+                        response: None
+                    },
+                    Trial {
+                        stimulus: 2,
+                        stimulus_onset_microseconds: 12,
+                        response: Some(Response {
+                            time_microseconds: 35,
+                            choice: Choice::Clearly(Button::Two)
+                        })
+                    }
+                ]
+                .into_iter(),
+                |button, &stimulus| match button {
+                    Button::One => stimulus == 1,
+                    Button::Two => stimulus == 2,
+                }
+            )
+            .collect::<Vec<_>>()
         )
     }
 }
