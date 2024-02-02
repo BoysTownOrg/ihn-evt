@@ -227,7 +227,7 @@ where
     Evaluation::Incorrect
 }
 
-fn get_behavior<T: Iterator<Item = Evaluation> + Clone>(evaluations: T) -> Behavior {
+pub fn get_behavior<T: Iterator<Item = Evaluation> + Clone>(evaluations: T) -> Behavior {
     Behavior {
         mean_reaction_time_milliseconds: {
             let reaction_times_microseconds = evaluations
