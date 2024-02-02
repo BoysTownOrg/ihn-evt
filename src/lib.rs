@@ -37,9 +37,15 @@ pub struct ReactionTime {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum Behavior {
+pub enum Evaluation {
     Correct(ReactionTime),
     Incorrect,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct Behavior {
+    mean_reaction_time_milliseconds: Option<i64>,
+    accuracy_percentage: f32,
 }
 
 #[derive(Debug)]
@@ -205,30 +211,73 @@ fn has_bit_set(x: i32, n: usize) -> bool {
     x & (1 << n) == (1 << n)
 }
 
-pub fn evaluate_trial<S, Q>(trial: &Trial<S>, button_is_correct: Q) -> Behavior
+pub fn evaluate_trial<S, Q>(trial: &Trial<S>, button_is_correct: Q) -> Evaluation
 where
     Q: Fn(&Button, &S) -> bool,
 {
     if let Some(response) = &trial.response {
         if let Choice::Clearly(button) = &response.choice {
             if button_is_correct(button, &trial.stimulus) {
-                return Behavior::Correct(ReactionTime {
+                return Evaluation::Correct(ReactionTime {
                     microseconds: response.time_microseconds - trial.stimulus_onset_microseconds,
                 });
             }
         }
     }
-    Behavior::Incorrect
+    Evaluation::Incorrect
+}
+
+fn get_behavior<T: Iterator<Item = Evaluation> + Clone>(evaluations: T) -> Behavior {
+    Behavior {
+        mean_reaction_time_milliseconds: {
+            let reaction_times_microseconds = evaluations
+                .clone()
+                .map(|e| match e {
+                    Evaluation::Correct(reaction_time) => Some(reaction_time.microseconds),
+                    Evaluation::Incorrect => None,
+                })
+                .flatten();
+            let count = reaction_times_microseconds.clone().count();
+            if count > 0 {
+                Some(rounded_divide(
+                    rounded_divide(reaction_times_microseconds.sum(), count.try_into().unwrap()),
+                    1000,
+                ))
+            } else {
+                None
+            }
+        },
+        accuracy_percentage: {
+            let count = evaluations.clone().count();
+            if count > 0 {
+                100. * evaluations
+                    .filter(|e| match e {
+                        Evaluation::Correct(_) => true,
+                        Evaluation::Incorrect => false,
+                    })
+                    .count() as f32
+                    / count as f32
+            } else {
+                std::f32::NAN
+            }
+        },
+    }
+}
+
+fn rounded_divide(dividend: i64, divisor: i64) -> i64 {
+    (dividend + divisor / 2) / divisor
 }
 
 #[cfg(test)]
 mod tests {
     use super::evaluate_trial;
     use super::find_trials;
+    use super::get_behavior;
     use super::parse_triggers;
     use super::Behavior;
     use super::Button;
     use super::Choice;
+    use super::Evaluation;
     use super::ReactionTime;
     use super::Response;
     use super::Trial;
@@ -342,15 +391,15 @@ Someone put something unexpected on this line
     }
 
     #[test]
-    fn behavior() {
+    fn evaluates_trials() {
         assert_eq!(
             vec![
-                Behavior::Correct(ReactionTime {
+                Evaluation::Correct(ReactionTime {
                     microseconds: 376340992 - 373920000
                 }),
-                Behavior::Incorrect,
-                Behavior::Incorrect,
-                Behavior::Correct(ReactionTime {
+                Evaluation::Incorrect,
+                Evaluation::Incorrect,
+                Evaluation::Correct(ReactionTime {
                     microseconds: 35 - 12
                 }),
             ],
@@ -393,6 +442,26 @@ Someone put something unexpected on this line
                 })
             )
             .collect::<Vec<_>>()
+        )
+    }
+
+    #[test]
+    fn gets_behavior() {
+        assert_eq!(
+            Behavior {
+                mean_reaction_time_milliseconds: Some(3),
+                accuracy_percentage: 60.
+            },
+            get_behavior(
+                [
+                    Evaluation::Correct(ReactionTime { microseconds: 1000 }),
+                    Evaluation::Incorrect,
+                    Evaluation::Incorrect,
+                    Evaluation::Correct(ReactionTime { microseconds: 2000 }),
+                    Evaluation::Correct(ReactionTime { microseconds: 6000 }),
+                ]
+                .into_iter()
+            )
         )
     }
 }
