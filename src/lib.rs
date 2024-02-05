@@ -44,8 +44,8 @@ pub enum Evaluation {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Behavior {
-    mean_reaction_time_milliseconds: Option<i64>,
-    accuracy_percentage: f32,
+    pub mean_reaction_time_milliseconds: Option<i64>,
+    pub accuracy_percentage: f32,
 }
 
 #[derive(Debug)]
