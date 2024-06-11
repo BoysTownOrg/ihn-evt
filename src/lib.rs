@@ -170,24 +170,21 @@ where
     let stimulus_trigger = &triggers[0];
     let stimulus = to_stimulus(stimulus_trigger);
     let stimulus_onset_microseconds = stimulus_trigger.time_microseconds;
-    let response = if let Some(response_index) = response_index(triggers) {
-        Some(Response {
-            choice: if has_bit_set(triggers[response_index].code, BUTTON1BIT)
-                && has_bit_set(triggers[response_index].code, BUTTON2BIT)
-            {
-                Choice::Ambiguous
-            } else if has_bit_set(triggers[response_index].code, BUTTON1BIT) {
-                Choice::Clearly(Button::One)
-            } else if has_bit_set(triggers[response_index].code, BUTTON2BIT) {
-                Choice::Clearly(Button::Two)
-            } else {
-                panic!("Can't get here!")
-            },
-            time_microseconds: triggers[response_index].time_microseconds,
+    let response = triggers.iter().find_map(|trigger| {
+        if has_bit_set(trigger.code, BUTTON1BIT) && has_bit_set(trigger.code, BUTTON2BIT) {
+            Some(Choice::Ambiguous)
+        } else if has_bit_set(trigger.code, BUTTON1BIT) {
+            Some(Choice::Clearly(Button::One))
+        } else if has_bit_set(trigger.code, BUTTON2BIT) {
+            Some(Choice::Clearly(Button::Two))
+        } else {
+            None
+        }
+        .map(|choice| Response {
+            choice,
+            time_microseconds: trigger.time_microseconds,
         })
-    } else {
-        None
-    };
+    });
 
     Trial {
         stimulus,
@@ -199,16 +196,8 @@ where
 const BUTTON1BIT: usize = 8;
 const BUTTON2BIT: usize = 9;
 
-fn response_index(triggers: &[Trigger]) -> Option<usize> {
-    triggers.into_iter().position(|trigger| {
-        let button1_mask = 1 << BUTTON1BIT;
-        let button2_mask = 1 << BUTTON2BIT;
-        trigger.code & (button1_mask | button2_mask) != 0
-    })
-}
-
 fn has_bit_set(x: i32, n: usize) -> bool {
-    x & (1 << n) == (1 << n)
+    x & (1 << n) != 0
 }
 
 pub fn evaluate_trial<S, Q>(trial: &Trial<S>, button_is_correct: Q) -> Evaluation
