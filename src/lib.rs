@@ -113,20 +113,21 @@ fn parse_trigger_line(line: &str) -> Result<Trigger, ContextualError> {
     })
 }
 
-pub fn find_trials<S, Q, T>(triggers: &[Trigger], is_stimulus: Q, to_stimulus: T) -> Vec<Trial<S>>
+pub fn find_trials<S, T>(triggers: &[Trigger], to_stimulus: T) -> Vec<Trial<S>>
 where
-    Q: Fn(&Trigger) -> bool,
-    T: Fn(&Trigger) -> S,
+    T: Fn(&Trigger) -> Option<S>,
 {
     let triggers = remove_duplicate_triggers(triggers);
-    find_stimulus_indices(&triggers, is_stimulus)
+    let indexed_stimuli = find_stimulus_indices(&triggers, to_stimulus);
+    let bounds: Vec<_> = indexed_stimuli
+        .iter()
+        .map(|(i, _)| *i)
+        .chain([triggers.len()].into_iter())
+        .collect();
+    bounds
         .windows(2)
-        .map(|stimulus_bounds| {
-            triggers_to_trial(
-                &triggers[stimulus_bounds[0]..stimulus_bounds[1]],
-                &to_stimulus,
-            )
-        })
+        .zip(indexed_stimuli.into_iter().map(|(_, s)| s))
+        .map(|(window, s)| triggers_to_trial(&triggers[window[0]..window[1]], s))
         .collect()
 }
 
@@ -150,25 +151,19 @@ fn remove_duplicate_triggers(triggers: &[Trigger]) -> Vec<Trigger> {
         .collect()
 }
 
-fn find_stimulus_indices<T>(triggers: &[Trigger], is_stimulus: T) -> Vec<usize>
+fn find_stimulus_indices<S, T>(triggers: &[Trigger], to_stimulus: T) -> Vec<(usize, S)>
 where
-    T: Fn(&Trigger) -> bool,
+    T: Fn(&Trigger) -> Option<S>,
 {
     triggers
         .into_iter()
         .enumerate()
-        .filter(|(_, event)| is_stimulus(event))
-        .map(|(index, _)| index)
-        .chain([triggers.len()].into_iter())
+        .filter_map(|(index, event)| to_stimulus(event).map(|s| (index, s)))
         .collect()
 }
 
-fn triggers_to_trial<T, S>(triggers: &[Trigger], to_stimulus: T) -> Trial<S>
-where
-    T: Fn(&Trigger) -> S,
-{
+fn triggers_to_trial<S>(triggers: &[Trigger], stimulus: S) -> Trial<S> {
     let stimulus_trigger = &triggers[0];
-    let stimulus = to_stimulus(stimulus_trigger);
     let stimulus_onset_microseconds = stimulus_trigger.time_microseconds;
     let response = triggers.iter().find_map(|trigger| {
         if has_bit_set(trigger.code, BUTTON1BIT) && has_bit_set(trigger.code, BUTTON2BIT) {
@@ -322,7 +317,7 @@ Someone put something unexpected on this line
         assert_eq!(
             vec![
                 Trial {
-                    stimulus: "hello".to_string(),
+                    stimulus: "hello",
                     stimulus_onset_microseconds: 373920000,
                     response: Some(Response {
                         time_microseconds: 376340992,
@@ -330,7 +325,7 @@ Someone put something unexpected on this line
                     })
                 },
                 Trial {
-                    stimulus: "hello".to_string(),
+                    stimulus: "hello",
                     stimulus_onset_microseconds: 377353984,
                     response: Some(Response {
                         time_microseconds: 378139008,
@@ -373,8 +368,10 @@ Someone put something unexpected on this line
                         code: 256
                     },
                 ],
-                |trigger| trigger.code == 42,
-                |_| "hello".to_string()
+                |trigger| match trigger.code {
+                    42 => Some("hello"),
+                    _ => None,
+                }
             )
         )
     }
