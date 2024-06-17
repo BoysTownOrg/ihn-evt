@@ -11,14 +11,14 @@ pub struct Trigger {
 #[derive(Debug, PartialEq, Clone)]
 pub struct Trial<S> {
     pub stimulus: S,
-    pub stimulus_onset_microseconds: Microseconds,
+    pub stimulus_trigger: Trigger,
     pub response: Option<Response>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Response {
     pub choice: Choice,
-    pub time_microseconds: i64,
+    pub trigger: Trigger,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -129,7 +129,6 @@ where
 
 fn triggers_to_trial<S>(triggers: &[Trigger], stimulus: S) -> Trial<S> {
     let stimulus_trigger = &triggers[0];
-    let stimulus_onset_microseconds = stimulus_trigger.time_microseconds;
     let response = triggers.iter().find_map(|trigger| {
         if has_bit_set(trigger.code, BUTTON1BIT) && has_bit_set(trigger.code, BUTTON2BIT) {
             Some(Choice::Ambiguous)
@@ -142,13 +141,13 @@ fn triggers_to_trial<S>(triggers: &[Trigger], stimulus: S) -> Trial<S> {
         }
         .map(|choice| Response {
             choice,
-            time_microseconds: trigger.time_microseconds,
+            trigger: trigger.clone(),
         })
     });
 
     Trial {
         stimulus,
-        stimulus_onset_microseconds,
+        stimulus_trigger: stimulus_trigger.clone(),
         response,
     }
 }
@@ -168,7 +167,8 @@ where
         if let Choice::Clearly(button) = &response.choice {
             if button_is_correct(button, &trial.stimulus) {
                 return Evaluation::Correct(ReactionTime {
-                    microseconds: response.time_microseconds - trial.stimulus_onset_microseconds,
+                    microseconds: response.trigger.time_microseconds
+                        - trial.stimulus_trigger.time_microseconds,
                 });
             }
         }
@@ -283,17 +283,29 @@ Someone put something unexpected on this line
             vec![
                 Trial {
                     stimulus: "hello",
-                    stimulus_onset_microseconds: 373920000,
+                    stimulus_trigger: Trigger {
+                        time_microseconds: 373920000,
+                        code: 42
+                    },
                     response: Some(Response {
-                        time_microseconds: 376340992,
+                        trigger: Trigger {
+                            time_microseconds: 376340992,
+                            code: 512
+                        },
                         choice: Choice::Clearly(Button::Two)
                     })
                 },
                 Trial {
                     stimulus: "hello",
-                    stimulus_onset_microseconds: 377353984,
+                    stimulus_trigger: Trigger {
+                        time_microseconds: 377353984,
+                        code: 42
+                    },
                     response: Some(Response {
-                        time_microseconds: 378139008,
+                        trigger: Trigger {
+                            time_microseconds: 378139008,
+                            code: 256
+                        },
                         choice: Choice::Clearly(Button::One)
                     })
                 }
@@ -357,30 +369,51 @@ Someone put something unexpected on this line
             [
                 Trial {
                     stimulus: 1,
-                    stimulus_onset_microseconds: 373920000,
+                    stimulus_trigger: Trigger {
+                        time_microseconds: 373920000,
+                        code: 1
+                    },
                     response: Some(Response {
-                        time_microseconds: 376340992,
+                        trigger: Trigger {
+                            time_microseconds: 376340992,
+                            code: 2
+                        },
                         choice: Choice::Clearly(Button::One)
                     })
                 },
                 Trial {
                     stimulus: 1,
-                    stimulus_onset_microseconds: 377353984,
+                    stimulus_trigger: Trigger {
+                        time_microseconds: 377353984,
+                        code: 3
+                    },
                     response: Some(Response {
-                        time_microseconds: 378139008,
+                        trigger: Trigger {
+                            time_microseconds: 378139008,
+                            code: 4
+                        },
                         choice: Choice::Clearly(Button::Two)
                     })
                 },
                 Trial {
                     stimulus: 2,
-                    stimulus_onset_microseconds: 88,
+                    stimulus_trigger: Trigger {
+                        time_microseconds: 88,
+                        code: 5
+                    },
                     response: None
                 },
                 Trial {
                     stimulus: 2,
-                    stimulus_onset_microseconds: 12,
+                    stimulus_trigger: Trigger {
+                        time_microseconds: 12,
+                        code: 6
+                    },
                     response: Some(Response {
-                        time_microseconds: 35,
+                        trigger: Trigger {
+                            time_microseconds: 35,
+                            code: 7
+                        },
                         choice: Choice::Clearly(Button::Two)
                     })
                 }
