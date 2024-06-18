@@ -87,7 +87,7 @@ pub fn find_trials<S, T>(
 where
     T: Fn(&Trigger) -> Option<S>,
 {
-    let triggers = remove_duplicate_triggers(triggers);
+    let triggers = preprocess_triggers(triggers, &to_stimulus);
     let indexed_stimuli = find_stimulus_indices(&triggers, to_stimulus);
     let bounds: Vec<_> = indexed_stimuli
         .iter()
@@ -101,22 +101,35 @@ where
         .collect()
 }
 
-fn remove_duplicate_triggers(triggers: &[Trigger]) -> Vec<Trigger> {
-    triggers
+fn preprocess_triggers<S, T>(triggers: &[Trigger], to_stimulus: &T) -> Vec<Trigger>
+where
+    T: Fn(&Trigger) -> Option<S>,
+{
+    let mut processed = triggers.to_vec();
+    for t in processed.iter_mut() {
+        t.code &= !(1 << 12);
+    }
+    processed
         .iter()
         .take(1)
-        .chain(
-            triggers
-                .windows(2)
-                .enumerate()
-                .filter(|(_, window)| {
-                    let first = &window[0];
-                    let second = &window[1];
-                    first.code != second.code
-                        || second.time_microseconds - first.time_microseconds > 1024
-                })
-                .map(|(index, _)| &triggers[index + 1]),
-        )
+        .chain(processed.windows(2).filter_map(|window| {
+            let first = &window[0];
+            let second = &window[1];
+            let elapsed = second.time_microseconds - first.time_microseconds;
+            // TODO: check this logic!!
+            if first.code != second.code {
+                return Some(second);
+            }
+            if elapsed > 16000 {
+                return Some(second);
+            }
+            if elapsed > 1024 {
+                if to_stimulus(first).is_none() || to_stimulus(second).is_none() {
+                    return Some(second);
+                }
+            }
+            return None;
+        }))
         .cloned()
         .collect()
 }
