@@ -25,6 +25,7 @@ pub struct Response {
 pub enum Button {
     One,
     Two,
+    Three,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -78,7 +79,11 @@ fn parse_trigger_line(line: &str) -> anyhow::Result<Trigger> {
     })
 }
 
-pub fn find_trials<S, T>(triggers: &[Trigger], to_stimulus: T) -> Vec<Trial<S>>
+pub fn find_trials<S, T>(
+    triggers: &[Trigger],
+    to_stimulus: T,
+    button_choices: &[Button],
+) -> Vec<Trial<S>>
 where
     T: Fn(&Trigger) -> Option<S>,
 {
@@ -92,7 +97,7 @@ where
     bounds
         .windows(2)
         .zip(indexed_stimuli.into_iter().map(|(_, s)| s))
-        .map(|(window, s)| triggers_to_trial(&triggers[window[0]..window[1]], s))
+        .map(|(window, s)| triggers_to_trial(&triggers[window[0]..window[1]], s, button_choices))
         .collect()
 }
 
@@ -127,15 +132,17 @@ where
         .collect()
 }
 
-fn triggers_to_trial<S>(triggers: &[Trigger], stimulus: S) -> Trial<S> {
+fn triggers_to_trial<S>(triggers: &[Trigger], stimulus: S, button_choices: &[Button]) -> Trial<S> {
     let stimulus_trigger = &triggers[0];
     let response = triggers.iter().find_map(|trigger| {
-        if has_bit_set(trigger.code, BUTTON1BIT) && has_bit_set(trigger.code, BUTTON2BIT) {
-            Some(Choice::Ambiguous)
-        } else if has_bit_set(trigger.code, BUTTON1BIT) {
-            Some(Choice::Clearly(Button::One))
-        } else if has_bit_set(trigger.code, BUTTON2BIT) {
-            Some(Choice::Clearly(Button::Two))
+        let mut chosen_buttons = button_choices
+            .iter()
+            .filter(|button| has_bit_set(trigger.code, button_bit(button)));
+        if let Some(button) = chosen_buttons.next() {
+            Some(match chosen_buttons.next() {
+                Some(_) => Choice::Ambiguous,
+                None => Choice::Clearly(button.clone()),
+            })
         } else {
             None
         }
@@ -152,8 +159,13 @@ fn triggers_to_trial<S>(triggers: &[Trigger], stimulus: S) -> Trial<S> {
     }
 }
 
-const BUTTON1BIT: usize = 8;
-const BUTTON2BIT: usize = 9;
+fn button_bit(button: &Button) -> usize {
+    match button {
+        Button::One => 8,
+        Button::Two => 9,
+        Button::Three => 10,
+    }
+}
 
 fn has_bit_set(x: i32, n: usize) -> bool {
     x & (1 << n) != 0
@@ -348,7 +360,8 @@ Someone put something unexpected on this line
                 |trigger| match trigger.code {
                     42 => Some("hello"),
                     _ => None,
-                }
+                },
+                &[Button::One, Button::Two]
             )
         )
     }
@@ -423,6 +436,7 @@ Someone put something unexpected on this line
                 |trial| evaluate_trial(&trial, |button, &stimulus| match button {
                     Button::One => stimulus == 1,
                     Button::Two => stimulus == 2,
+                    Button::Three => stimulus == 3,
                 })
             )
             .collect::<Vec<_>>()
