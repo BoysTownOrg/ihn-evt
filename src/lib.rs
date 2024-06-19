@@ -21,7 +21,7 @@ pub struct Response {
     pub trigger: Trigger,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Eq, PartialOrd, Ord)]
 pub enum Button {
     One,
     Two,
@@ -79,14 +79,15 @@ fn parse_trigger_line(line: &str) -> anyhow::Result<Trigger> {
     })
 }
 
-pub fn find_trials<S, T>(
+pub fn find_trials<S, T, const N: usize>(
     triggers: &[Trigger],
     to_stimulus: T,
-    button_choices: &[Button],
+    button_choices: [Button; N],
 ) -> Vec<Trial<S>>
 where
     T: Fn(&Trigger) -> Option<S>,
 {
+    let button_choices = std::collections::BTreeSet::from(button_choices);
     let triggers = preprocess_triggers(triggers, &to_stimulus);
     let indexed_stimuli = find_stimulus_indices(&triggers, to_stimulus);
     let bounds: Vec<_> = indexed_stimuli
@@ -96,8 +97,10 @@ where
         .collect();
     bounds
         .windows(2)
-        .zip(indexed_stimuli.into_iter().map(|(_, s)| s))
-        .map(|(window, s)| triggers_to_trial(&triggers[window[0]..window[1]], s, button_choices))
+        .zip(indexed_stimuli.into_iter().map(|(_, stimulus)| stimulus))
+        .map(|(window, stimulus)| {
+            triggers_to_trial(&triggers[window[0]..window[1]], stimulus, &button_choices)
+        })
         .collect()
 }
 
@@ -116,19 +119,11 @@ where
             let first = &window[0];
             let second = &window[1];
             let elapsed = second.time_microseconds - first.time_microseconds;
-            // TODO: check this logic!!
-            if first.code != second.code {
-                return Some(second);
+            if first.code != second.code || elapsed > 16000 || to_stimulus(first).is_none() {
+                Some(second)
+            } else {
+                None
             }
-            if elapsed > 16000 {
-                return Some(second);
-            }
-            if elapsed > 1024 {
-                if to_stimulus(first).is_none() || to_stimulus(second).is_none() {
-                    return Some(second);
-                }
-            }
-            return None;
         }))
         .cloned()
         .collect()
@@ -145,7 +140,11 @@ where
         .collect()
 }
 
-fn triggers_to_trial<S>(triggers: &[Trigger], stimulus: S, button_choices: &[Button]) -> Trial<S> {
+fn triggers_to_trial<S>(
+    triggers: &[Trigger],
+    stimulus: S,
+    button_choices: &std::collections::BTreeSet<Button>,
+) -> Trial<S> {
     let stimulus_trigger = &triggers[0];
     let response = triggers.iter().find_map(|trigger| {
         let mut chosen_buttons = button_choices
@@ -374,7 +373,7 @@ Someone put something unexpected on this line
                     42 => Some("hello"),
                     _ => None,
                 },
-                &[Button::One, Button::Two]
+                [Button::One, Button::Two]
             )
         )
     }
@@ -467,7 +466,7 @@ Someone put something unexpected on this line
                     40 => Some("hello"),
                     _ => None,
                 },
-                &[Button::One, Button::Two, Button::Three]
+                [Button::One, Button::Two, Button::Three]
             )
         )
     }
@@ -552,7 +551,108 @@ Someone put something unexpected on this line
                     40 => Some("hello"),
                     _ => None,
                 },
-                &[Button::One, Button::Two, Button::Three]
+                [Button::One, Button::Two, Button::Three]
+            )
+        )
+    }
+
+    #[test]
+    fn finds_trials_with_duplicate_triggers() {
+        assert_eq!(
+            vec![
+                Trial {
+                    stimulus: "hello",
+                    stimulus_trigger: Trigger {
+                        time_microseconds: 9697000,
+                        code: 40
+                    },
+                    response: Some(Response {
+                        trigger: Trigger {
+                            time_microseconds: 10676000,
+                            code: 512
+                        },
+                        choice: Choice::Clearly(Button::Two)
+                    })
+                },
+                Trial {
+                    stimulus: "hello",
+                    stimulus_trigger: Trigger {
+                        time_microseconds: 14299000,
+                        code: 40
+                    },
+                    response: Some(Response {
+                        trigger: Trigger {
+                            time_microseconds: 15053000,
+                            code: 256
+                        },
+                        choice: Choice::Clearly(Button::One)
+                    })
+                }
+            ],
+            find_trials(
+                &[
+                    Trigger {
+                        time_microseconds: 6547000,
+                        code: 4156
+                    },
+                    Trigger {
+                        time_microseconds: 7700000,
+                        code: 32
+                    },
+                    Trigger {
+                        time_microseconds: 7720000,
+                        code: 4096
+                    },
+                    Trigger {
+                        time_microseconds: 9697000,
+                        code: 40
+                    },
+                    Trigger {
+                        time_microseconds: 9698000,
+                        code: 40
+                    },
+                    Trigger {
+                        time_microseconds: 9705000,
+                        code: 4136
+                    },
+                    Trigger {
+                        time_microseconds: 10676000,
+                        code: 512
+                    },
+                    Trigger {
+                        time_microseconds: 10699000,
+                        code: 4156
+                    },
+                    Trigger {
+                        time_microseconds: 12302000,
+                        code: 31
+                    },
+                    Trigger {
+                        time_microseconds: 12323000,
+                        code: 4096
+                    },
+                    Trigger {
+                        time_microseconds: 14299000,
+                        code: 40
+                    },
+                    Trigger {
+                        time_microseconds: 14300000,
+                        code: 40
+                    },
+                    Trigger {
+                        time_microseconds: 14307000,
+                        code: 4136
+                    },
+                    Trigger {
+                        time_microseconds: 15053000,
+                        code: 256
+                    },
+                ],
+                |trigger| match trigger.code {
+                    40 => Some("hello"),
+                    _ => None,
+                },
+                [Button::One, Button::Two, Button::Three]
             )
         )
     }
