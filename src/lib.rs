@@ -473,6 +473,91 @@ Someone put something unexpected on this line
     }
 
     #[test]
+    fn finds_trials_with_combined_propixx() {
+        assert_eq!(
+            vec![
+                Trial {
+                    stimulus: "hello",
+                    stimulus_trigger: Trigger {
+                        time_microseconds: 9705000,
+                        code: 40
+                    },
+                    response: Some(Response {
+                        trigger: Trigger {
+                            time_microseconds: 10676000,
+                            code: 512
+                        },
+                        choice: Choice::Clearly(Button::Two)
+                    })
+                },
+                Trial {
+                    stimulus: "hello",
+                    stimulus_trigger: Trigger {
+                        time_microseconds: 14307000,
+                        code: 40
+                    },
+                    response: Some(Response {
+                        trigger: Trigger {
+                            time_microseconds: 15053000,
+                            code: 256
+                        },
+                        choice: Choice::Clearly(Button::One)
+                    })
+                }
+            ],
+            find_trials(
+                &[
+                    Trigger {
+                        time_microseconds: 6547000,
+                        code: 4156
+                    },
+                    Trigger {
+                        time_microseconds: 7700000,
+                        code: 32
+                    },
+                    Trigger {
+                        time_microseconds: 7720000,
+                        code: 4096
+                    },
+                    Trigger {
+                        time_microseconds: 9705000,
+                        code: 4136
+                    },
+                    Trigger {
+                        time_microseconds: 10676000,
+                        code: 512
+                    },
+                    Trigger {
+                        time_microseconds: 10699000,
+                        code: 4156
+                    },
+                    Trigger {
+                        time_microseconds: 12302000,
+                        code: 31
+                    },
+                    Trigger {
+                        time_microseconds: 12323000,
+                        code: 4096
+                    },
+                    Trigger {
+                        time_microseconds: 14307000,
+                        code: 4136
+                    },
+                    Trigger {
+                        time_microseconds: 15053000,
+                        code: 256
+                    },
+                ],
+                |trigger| match trigger.code {
+                    40 => Some("hello"),
+                    _ => None,
+                },
+                &[Button::One, Button::Two, Button::Three]
+            )
+        )
+    }
+
+    #[test]
     fn evaluates_trials() {
         assert_eq!(
             vec![
