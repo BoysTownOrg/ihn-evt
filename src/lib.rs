@@ -48,6 +48,8 @@ pub enum Evaluation {
 #[derive(Debug, PartialEq, Clone)]
 pub struct Behavior {
     pub mean_reaction_time_milliseconds: Option<i64>,
+    pub mean_reaction_time_microseconds: Option<f64>,
+    pub standard_deviation_reaction_time_microseconds: Option<f64>,
     pub accuracy_percentage: f32,
 }
 
@@ -201,25 +203,49 @@ where
 }
 
 pub fn get_behavior<T: Iterator<Item = Evaluation> + Clone>(evaluations: T) -> Behavior {
-    Behavior {
-        mean_reaction_time_milliseconds: {
-            let reaction_times_microseconds = evaluations
-                .clone()
-                .map(|e| match e {
-                    Evaluation::Correct(reaction_time) => Some(reaction_time.microseconds),
-                    Evaluation::Incorrect => None,
-                })
-                .flatten();
-            let count = reaction_times_microseconds.clone().count();
-            if count > 0 {
-                Some(rounded_divide(
-                    rounded_divide(reaction_times_microseconds.sum(), count.try_into().unwrap()),
-                    1000,
-                ))
+    let reaction_times_us = evaluations.clone().flat_map(|e| match e {
+        Evaluation::Correct(reaction_time) => Some(reaction_time.microseconds),
+        Evaluation::Incorrect => None,
+    });
+    let rt_sum_us = reaction_times_us.clone().sum::<i64>();
+    let rt_count = reaction_times_us.clone().count();
+    let mean_reaction_time_microseconds = if rt_count > 0 {
+        Some(rt_sum_us as f64 / rt_count as f64)
+    } else {
+        None
+    };
+    let mean_reaction_time_milliseconds = if rt_count > 0 {
+        Some(rounded_divide(
+            rounded_divide(rt_sum_us, rt_count.try_into().unwrap()),
+            1000,
+        ))
+    } else {
+        None
+    };
+    //https://rust-lang-nursery.github.io/rust-cookbook/science/mathematics/statistics.html
+    let standard_deviation_reaction_time_microseconds =
+        if let Some(mean) = mean_reaction_time_microseconds {
+            // MATLAB uses a normalization factor of N - 1: https://www.mathworks.com/help/matlab/ref/std.html
+            if rt_count > 1 {
+                let variance = reaction_times_us
+                    .map(|rt| {
+                        let diff = mean - (rt as f64);
+                        diff * diff
+                    })
+                    .sum::<f64>()
+                    / (rt_count - 1) as f64;
+                Some(variance.sqrt())
             } else {
                 None
             }
-        },
+        } else {
+            None
+        };
+
+    Behavior {
+        mean_reaction_time_milliseconds,
+        mean_reaction_time_microseconds,
+        standard_deviation_reaction_time_microseconds,
         accuracy_percentage: {
             let count = evaluations.clone().count();
             if count > 0 {
@@ -739,6 +765,8 @@ Someone put something unexpected on this line
         assert_eq!(
             Behavior {
                 mean_reaction_time_milliseconds: Some(3),
+                mean_reaction_time_microseconds: Some(3000.),
+                standard_deviation_reaction_time_microseconds: Some(2645.7513110645905),
                 accuracy_percentage: 60.
             },
             get_behavior(
@@ -748,6 +776,30 @@ Someone put something unexpected on this line
                     Evaluation::Incorrect,
                     Evaluation::Correct(ReactionTime { microseconds: 2000 }),
                     Evaluation::Correct(ReactionTime { microseconds: 6000 }),
+                ]
+                .into_iter()
+            )
+        )
+    }
+
+    #[test]
+    fn gets_behavior_2() {
+        assert_eq!(
+            Behavior {
+                mean_reaction_time_milliseconds: Some(6),
+                mean_reaction_time_microseconds: Some(5555.),
+                standard_deviation_reaction_time_microseconds: Some(3529.5108254072074),
+                accuracy_percentage: 57.1428571428571
+            },
+            get_behavior(
+                [
+                    Evaluation::Correct(ReactionTime { microseconds: 1234 }),
+                    Evaluation::Incorrect,
+                    Evaluation::Incorrect,
+                    Evaluation::Correct(ReactionTime { microseconds: 5678 }),
+                    Evaluation::Correct(ReactionTime { microseconds: 9876 }),
+                    Evaluation::Incorrect,
+                    Evaluation::Correct(ReactionTime { microseconds: 5432 }),
                 ]
                 .into_iter()
             )
