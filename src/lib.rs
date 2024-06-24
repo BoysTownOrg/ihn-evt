@@ -121,7 +121,7 @@ where
             let first = &window[0];
             let second = &window[1];
             let elapsed = second.time_microseconds - first.time_microseconds;
-            if first.code != second.code || elapsed > 16000 || to_stimulus(first).is_none() {
+            if elapsed > 16000 || to_stimulus(first).is_none() || to_stimulus(second).is_none() {
                 Some(second)
             } else {
                 None
@@ -679,6 +679,58 @@ Someone put something unexpected on this line
                     _ => None,
                 },
                 [Button::One, Button::Two, Button::Three]
+            )
+        )
+    }
+
+    #[test]
+    fn wild_5th_bit() {
+        assert_eq!(
+            vec![Trial {
+                stimulus: "hey",
+                stimulus_trigger: Trigger {
+                    code: 23,
+                    time_microseconds: 291763008
+                },
+                response: Some(Response {
+                    choice: Choice::Clearly(Button::Two),
+                    trigger: Trigger {
+                        code: 512,
+                        time_microseconds: 292801984
+                    }
+                })
+            },],
+            find_trials(
+                &[
+                    Trigger {
+                        code: 4156,
+                        time_microseconds: 289998016
+                    },
+                    Trigger {
+                        code: 23,
+                        time_microseconds: 291763008
+                    },
+                    Trigger {
+                        code: 4103,
+                        time_microseconds: 291775008
+                    },
+                    Trigger {
+                        code: 512,
+                        time_microseconds: 292801984
+                    },
+                    Trigger {
+                        code: 4156,
+                        time_microseconds: 293764992
+                    },
+                ],
+                |t| {
+                    let masked = t.code & !(1 << 4);
+                    match masked {
+                        4..=9 => Some("hey"),
+                        _ => None,
+                    }
+                },
+                [Button::One, Button::Two]
             )
         )
     }
