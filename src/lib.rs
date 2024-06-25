@@ -81,15 +81,14 @@ fn parse_trigger_line(line: &str) -> anyhow::Result<Trigger> {
     })
 }
 
-pub fn find_trials<S, T, const N: usize>(
+pub fn find_trials<S, T>(
     triggers: &[Trigger],
     to_stimulus: T,
-    button_choices: [Button; N],
+    button_choices: &std::collections::BTreeSet<Button>,
 ) -> Vec<Trial<S>>
 where
     T: Fn(&Trigger) -> Option<S>,
 {
-    let button_choices = std::collections::BTreeSet::from(button_choices);
     let triggers = preprocess_triggers(triggers, &to_stimulus);
     let indexed_stimuli = find_stimulus_indices(&triggers, to_stimulus);
     let bounds: Vec<_> = indexed_stimuli
@@ -399,7 +398,7 @@ Someone put something unexpected on this line
                     42 => Some("hello"),
                     _ => None,
                 },
-                [Button::One, Button::Two]
+                &std::collections::BTreeSet::from([Button::One, Button::Two])
             )
         )
     }
@@ -492,7 +491,7 @@ Someone put something unexpected on this line
                     40 => Some("hello"),
                     _ => None,
                 },
-                [Button::One, Button::Two, Button::Three]
+                &std::collections::BTreeSet::from([Button::One, Button::Two, Button::Three])
             )
         )
     }
@@ -577,7 +576,7 @@ Someone put something unexpected on this line
                     40 => Some("hello"),
                     _ => None,
                 },
-                [Button::One, Button::Two, Button::Three]
+                &std::collections::BTreeSet::from([Button::One, Button::Two, Button::Three])
             )
         )
     }
@@ -678,7 +677,7 @@ Someone put something unexpected on this line
                     40 => Some("hello"),
                     _ => None,
                 },
-                [Button::One, Button::Two, Button::Three]
+                &std::collections::BTreeSet::from([Button::One, Button::Two, Button::Three])
             )
         )
     }
@@ -730,7 +729,7 @@ Someone put something unexpected on this line
                         _ => None,
                     }
                 },
-                [Button::One, Button::Two]
+                &std::collections::BTreeSet::from([Button::One, Button::Two])
             )
         )
     }
