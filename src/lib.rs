@@ -81,6 +81,18 @@ fn parse_trigger_line(line: &str) -> anyhow::Result<Trigger> {
     })
 }
 
+pub fn write_triggers<W>(file: &mut W, triggers: &[Trigger]) -> anyhow::Result<()>
+where
+    W: std::io::Write,
+{
+    writeln!(file, "Tmu\tCode\tTriNo").context("Unable to write to file")?;
+    for trigger in triggers {
+        writeln!(file, "{}\t1\t{}", trigger.time_microseconds, trigger.code)
+            .context("Unable to write to file")?;
+    }
+    Ok(())
+}
+
 pub fn find_trials<S, T>(
     triggers: &[Trigger],
     to_stimulus: T,
