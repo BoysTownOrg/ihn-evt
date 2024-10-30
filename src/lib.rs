@@ -121,25 +121,24 @@ fn preprocess_triggers<S, T>(triggers: &[Trigger], to_stimulus: &T) -> Vec<Trigg
 where
     T: Fn(&Trigger) -> Option<S>,
 {
-    let mut processed = triggers.to_vec();
-    for t in processed.iter_mut() {
-        t.code &= !(1 << 12);
-    }
-    processed
+    let mut last_stimulus_time_microseconds = None;
+    return triggers
         .iter()
-        .take(1)
-        .chain(processed.windows(2).filter_map(|window| {
-            let first = &window[0];
-            let second = &window[1];
-            let elapsed = second.time_microseconds - first.time_microseconds;
-            if elapsed > 16000 || to_stimulus(first).is_none() || to_stimulus(second).is_none() {
-                Some(second)
-            } else {
-                None
+        .map(|t| Trigger {
+            time_microseconds: t.time_microseconds,
+            code: t.code & !(1 << 12),
+        })
+        .filter_map(|t| {
+            if to_stimulus(&t).is_some() {
+                if last_stimulus_time_microseconds.is_some_and(|u| t.time_microseconds - u <= 16000)
+                {
+                    return None;
+                }
+                last_stimulus_time_microseconds = Some(t.time_microseconds);
             }
-        }))
-        .cloned()
-        .collect()
+            Some(t)
+        })
+        .collect();
 }
 
 fn find_stimulus_indices<S, T>(triggers: &[Trigger], to_stimulus: T) -> Vec<(usize, S)>
@@ -690,6 +689,88 @@ Someone put something unexpected on this line
                     _ => None,
                 },
                 &std::collections::BTreeSet::from([Button::One, Button::Two, Button::Three])
+            )
+        )
+    }
+
+    #[test]
+    fn finds_trials_with_nonadjacent_duplicate_trigger() {
+        assert_eq!(
+            vec![
+                Trial {
+                    stimulus: "a",
+                    stimulus_trigger: Trigger {
+                        time_microseconds: 39907000,
+                        code: 42
+                    },
+                    response: Some(Response {
+                        trigger: Trigger {
+                            time_microseconds: 42158000,
+                            code: 256
+                        },
+                        choice: Choice::Clearly(Button::One)
+                    })
+                },
+                Trial {
+                    stimulus: "b",
+                    stimulus_trigger: Trigger {
+                        time_microseconds: 44202000,
+                        code: 44
+                    },
+                    response: Some(Response {
+                        trigger: Trigger {
+                            time_microseconds: 45812000,
+                            code: 512
+                        },
+                        choice: Choice::Clearly(Button::Two)
+                    })
+                }
+            ],
+            find_trials(
+                &[
+                    Trigger {
+                        time_microseconds: 38153000,
+                        code: 4146
+                    },
+                    Trigger {
+                        time_microseconds: 39907000,
+                        code: 42
+                    },
+                    Trigger {
+                        time_microseconds: 39913000,
+                        code: 46
+                    },
+                    Trigger {
+                        time_microseconds: 39917000,
+                        code: 4138
+                    },
+                    Trigger {
+                        time_microseconds: 42158000,
+                        code: 256
+                    },
+                    Trigger {
+                        time_microseconds: 42610000,
+                        code: 4146
+                    },
+                    Trigger {
+                        time_microseconds: 44202000,
+                        code: 44
+                    },
+                    Trigger {
+                        time_microseconds: 44219000,
+                        code: 4096
+                    },
+                    Trigger {
+                        time_microseconds: 45812000,
+                        code: 512
+                    },
+                ],
+                |trigger| match trigger.code {
+                    42 => Some("a"),
+                    44 => Some("b"),
+                    _ => None,
+                },
+                &std::collections::BTreeSet::from([Button::One, Button::Two])
             )
         )
     }
