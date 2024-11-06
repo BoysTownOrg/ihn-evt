@@ -47,14 +47,14 @@ pub enum Evaluation {
 
 #[derive(Debug, PartialEq)]
 pub struct ReactionTimeStats {
-    mean_ms: f64,
-    std_ms: f64,
+    pub mean_ms: f64,
+    pub std_ms: f64,
 }
 
 #[derive(Debug, PartialEq)]
 pub struct Accuracy {
-    percent: f32,
-    count: usize,
+    pub percent: f32,
+    pub count: usize,
 }
 
 pub fn parse_triggers(input: &str) -> anyhow::Result<Vec<Trigger>> {
