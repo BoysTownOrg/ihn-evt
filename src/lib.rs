@@ -45,12 +45,16 @@ pub enum Evaluation {
     Incorrect,
 }
 
-#[derive(Debug, PartialEq, Clone)]
-pub struct Behavior {
-    pub mean_reaction_time_milliseconds: Option<i64>,
-    pub mean_reaction_time_microseconds: Option<f64>,
-    pub standard_deviation_reaction_time_microseconds: Option<f64>,
-    pub accuracy_percentage: f32,
+#[derive(Debug, PartialEq)]
+pub struct ReactionTimeStats {
+    mean_ms: f64,
+    std_ms: f64,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Accuracy {
+    percent: f32,
+    count: usize,
 }
 
 pub fn parse_triggers(input: &str) -> anyhow::Result<Vec<Trigger>> {
@@ -212,82 +216,68 @@ where
     Evaluation::Incorrect
 }
 
-pub fn get_behavior<T: Iterator<Item = Evaluation> + Clone>(evaluations: T) -> Behavior {
-    let reaction_times_us = evaluations.clone().flat_map(|e| match e {
-        Evaluation::Correct(reaction_time) => Some(reaction_time.microseconds),
-        Evaluation::Incorrect => None,
-    });
-    let rt_sum_us = reaction_times_us.clone().sum::<i64>();
-    let rt_count = reaction_times_us.clone().count();
-    let mean_reaction_time_microseconds = if rt_count > 0 {
-        Some(rt_sum_us as f64 / rt_count as f64)
-    } else {
-        None
-    };
-    let mean_reaction_time_milliseconds = if rt_count > 0 {
-        Some(rounded_divide(
-            rounded_divide(rt_sum_us, rt_count.try_into().unwrap()),
-            1000,
-        ))
-    } else {
-        None
-    };
-    //https://rust-lang-nursery.github.io/rust-cookbook/science/mathematics/statistics.html
-    let standard_deviation_reaction_time_microseconds =
-        if let Some(mean) = mean_reaction_time_microseconds {
-            // MATLAB uses a normalization factor of N - 1: https://www.mathworks.com/help/matlab/ref/std.html
-            if rt_count > 1 {
-                let variance = reaction_times_us
-                    .map(|rt| {
-                        let diff = mean - (rt as f64);
-                        diff * diff
-                    })
-                    .sum::<f64>()
-                    / (rt_count - 1) as f64;
-                Some(variance.sqrt())
-            } else {
-                None
-            }
-        } else {
-            None
-        };
+pub fn accuracy<T: Iterator<Item = Evaluation> + Clone>(evaluations: T) -> Accuracy {
+    let count = evaluations
+        .clone()
+        .filter(|e| match e {
+            Evaluation::Correct(_) => true,
+            Evaluation::Incorrect => false,
+        })
+        .count();
+    let total_count = evaluations.count();
+    let percent = 100. * count as f32 / total_count as f32;
 
-    Behavior {
-        mean_reaction_time_milliseconds,
-        mean_reaction_time_microseconds,
-        standard_deviation_reaction_time_microseconds,
-        accuracy_percentage: {
-            let count = evaluations.clone().count();
-            if count > 0 {
-                100. * evaluations
-                    .filter(|e| match e {
-                        Evaluation::Correct(_) => true,
-                        Evaluation::Incorrect => false,
-                    })
-                    .count() as f32
-                    / count as f32
-            } else {
-                std::f32::NAN
-            }
-        },
-    }
+    Accuracy { percent, count }
 }
 
-fn rounded_divide(dividend: i64, divisor: i64) -> i64 {
-    (dividend + divisor / 2) / divisor
+// f64 can represent all integers less than or equal to 2^53.
+// This includes all integer microsecond values less than 285 years.
+// You're not going to lose precision by casting a microsecond value to a f64 here.
+pub fn reaction_time_stats<T: Iterator<Item = Evaluation> + Clone>(
+    evaluations: T,
+) -> ReactionTimeStats {
+    let reaction_times_ms = evaluations.clone().flat_map(|e| match e {
+        Evaluation::Correct(rt) => Some(rt.microseconds as f64 / 1000.),
+        Evaluation::Incorrect => None,
+    });
+    let rt_sum_ms = reaction_times_ms.clone().sum::<f64>();
+    let rt_count = reaction_times_ms.clone().count();
+    let mean_ms = rt_sum_ms / rt_count as f64;
+    //https://rust-lang-nursery.github.io/rust-cookbook/science/mathematics/statistics.html
+    // MATLAB uses a normalization factor of N - 1: https://www.mathworks.com/help/matlab/ref/std.html
+    let std_ms = if rt_count > 0 {
+        let variance = reaction_times_ms
+            .map(|rt_ms| {
+                let diff = mean_ms - rt_ms;
+                diff * diff
+            })
+            .sum::<f64>()
+            / (rt_count - 1) as f64;
+        variance.sqrt()
+    } else {
+        std::f64::NAN
+    };
+
+    ReactionTimeStats { mean_ms, std_ms }
+}
+
+pub fn reaction_time_is_outlier(stats: &ReactionTimeStats, rt: &ReactionTime) -> bool {
+    (rt.microseconds as f64 / 1000. - stats.mean_ms).abs() >= 3. * stats.std_ms
 }
 
 #[cfg(test)]
 mod tests {
+    use super::accuracy;
     use super::evaluate_trial;
     use super::find_trials;
-    use super::get_behavior;
     use super::parse_triggers;
-    use super::Behavior;
+    use super::reaction_time_stats;
+    use super::Accuracy;
     use super::Button;
     use super::Choice;
     use super::Evaluation;
     use super::ReactionTime;
+    use super::ReactionTimeStats;
     use super::Response;
     use super::Trial;
     use super::Trigger;
@@ -905,15 +895,13 @@ Someone put something unexpected on this line
     }
 
     #[test]
-    fn gets_behavior() {
+    fn calculates_accuracy() {
         assert_eq!(
-            Behavior {
-                mean_reaction_time_milliseconds: Some(3),
-                mean_reaction_time_microseconds: Some(3000.),
-                standard_deviation_reaction_time_microseconds: Some(2645.7513110645905),
-                accuracy_percentage: 60.
+            Accuracy {
+                percent: 60.,
+                count: 3
             },
-            get_behavior(
+            accuracy(
                 [
                     Evaluation::Correct(ReactionTime { microseconds: 1000 }),
                     Evaluation::Incorrect,
@@ -927,15 +915,33 @@ Someone put something unexpected on this line
     }
 
     #[test]
-    fn gets_behavior_2() {
+    fn calculates_rt_stats() {
         assert_eq!(
-            Behavior {
-                mean_reaction_time_milliseconds: Some(6),
-                mean_reaction_time_microseconds: Some(5555.),
-                standard_deviation_reaction_time_microseconds: Some(3529.5108254072074),
-                accuracy_percentage: 57.1428571428571
+            ReactionTimeStats {
+                mean_ms: 3.,
+                std_ms: 2.6457513110645905,
             },
-            get_behavior(
+            reaction_time_stats(
+                [
+                    Evaluation::Correct(ReactionTime { microseconds: 1000 }),
+                    Evaluation::Incorrect,
+                    Evaluation::Incorrect,
+                    Evaluation::Correct(ReactionTime { microseconds: 2000 }),
+                    Evaluation::Correct(ReactionTime { microseconds: 6000 }),
+                ]
+                .into_iter()
+            )
+        )
+    }
+
+    #[test]
+    fn calculates_accuracy_2() {
+        assert_eq!(
+            Accuracy {
+                percent: 57.1428571428571,
+                count: 4
+            },
+            accuracy(
                 [
                     Evaluation::Correct(ReactionTime { microseconds: 1234 }),
                     Evaluation::Incorrect,
@@ -948,5 +954,73 @@ Someone put something unexpected on this line
                 .into_iter()
             )
         )
+    }
+
+    #[test]
+    fn calculates_rt_stats_2() {
+        assert_eq!(
+            ReactionTimeStats {
+                mean_ms: 5.555,
+                std_ms: 3.5295108254072074,
+            },
+            reaction_time_stats(
+                [
+                    Evaluation::Correct(ReactionTime { microseconds: 1234 }),
+                    Evaluation::Incorrect,
+                    Evaluation::Incorrect,
+                    Evaluation::Correct(ReactionTime { microseconds: 5678 }),
+                    Evaluation::Correct(ReactionTime { microseconds: 9876 }),
+                    Evaluation::Incorrect,
+                    Evaluation::Correct(ReactionTime { microseconds: 5432 }),
+                ]
+                .into_iter()
+            )
+        )
+    }
+
+    #[test]
+    fn calculates_accuracy_all_incorrect() {
+        assert_eq!(
+            Accuracy {
+                percent: 0.,
+                count: 0
+            },
+            accuracy(
+                [
+                    Evaluation::Incorrect,
+                    Evaluation::Incorrect,
+                    Evaluation::Incorrect,
+                ]
+                .into_iter()
+            )
+        )
+    }
+
+    #[test]
+    fn calculates_rt_stats_all_incorrect() {
+        let stats = reaction_time_stats(
+            [
+                Evaluation::Incorrect,
+                Evaluation::Incorrect,
+                Evaluation::Incorrect,
+            ]
+            .into_iter(),
+        );
+        assert_eq!(true, stats.std_ms.is_nan());
+        assert_eq!(true, stats.mean_ms.is_nan());
+    }
+
+    #[test]
+    fn calculates_accuracy_none() {
+        let acc = accuracy([].into_iter());
+        assert_eq!(true, acc.percent.is_nan());
+        assert_eq!(0, acc.count);
+    }
+
+    #[test]
+    fn calculates_rt_stats_none() {
+        let stats = reaction_time_stats([].into_iter());
+        assert_eq!(true, stats.std_ms.is_nan());
+        assert_eq!(true, stats.mean_ms.is_nan());
     }
 }
