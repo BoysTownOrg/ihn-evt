@@ -105,7 +105,6 @@ pub fn find_trials<S, T>(
 where
     T: Fn(&Trigger) -> Option<S>,
 {
-    let triggers = preprocess_triggers(triggers, &to_stimulus);
     let indexed_stimuli = find_stimulus_indices(&triggers, to_stimulus);
     let bounds: Vec<_> = indexed_stimuli
         .iter()
@@ -121,38 +120,31 @@ where
         .collect()
 }
 
-fn preprocess_triggers<S, T>(triggers: &[Trigger], to_stimulus: &T) -> Vec<Trigger>
-where
-    T: Fn(&Trigger) -> Option<S>,
-{
-    let mut last_stimulus_time_microseconds = None;
-    return triggers
-        .iter()
-        .map(|t| Trigger {
-            time_microseconds: t.time_microseconds,
-            code: t.code & !(1 << 12),
-        })
-        .filter_map(|t| {
-            if to_stimulus(&t).is_some() {
-                if last_stimulus_time_microseconds.is_some_and(|u| t.time_microseconds - u <= 16000)
-                {
-                    return None;
-                }
-                last_stimulus_time_microseconds = Some(t.time_microseconds);
-            }
-            Some(t)
-        })
-        .collect();
-}
-
 fn find_stimulus_indices<S, T>(triggers: &[Trigger], to_stimulus: T) -> Vec<(usize, S)>
 where
     T: Fn(&Trigger) -> Option<S>,
 {
+    let mut last_stimulus_time_microseconds = None;
     triggers
         .into_iter()
         .enumerate()
-        .filter_map(|(index, event)| to_stimulus(event).map(|s| (index, s)))
+        .filter_map(|(index, trigger)| {
+            if let Some(stimulus) = to_stimulus(&Trigger {
+                time_microseconds: trigger.time_microseconds,
+                code: trigger.code & !(1 << 12),
+            }) {
+                if last_stimulus_time_microseconds
+                    .is_some_and(|u| trigger.time_microseconds - u <= 16000)
+                {
+                    None
+                } else {
+                    last_stimulus_time_microseconds = Some(trigger.time_microseconds);
+                    Some((index, stimulus))
+                }
+            } else {
+                None
+            }
+        })
         .collect()
 }
 
@@ -505,7 +497,7 @@ Someone put something unexpected on this line
                     stimulus: "hello",
                     stimulus_trigger: Trigger {
                         time_microseconds: 9705000,
-                        code: 40
+                        code: 4136
                     },
                     response: Some(Response {
                         trigger: Trigger {
@@ -519,7 +511,7 @@ Someone put something unexpected on this line
                     stimulus: "hello",
                     stimulus_trigger: Trigger {
                         time_microseconds: 14307000,
-                        code: 40
+                        code: 4136
                     },
                     response: Some(Response {
                         trigger: Trigger {
