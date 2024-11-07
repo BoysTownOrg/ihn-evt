@@ -12,6 +12,7 @@ pub struct Trigger {
 pub struct Trial<S> {
     pub stimulus: S,
     pub stimulus_trigger: Trigger,
+    pub propixx_trigger: Option<Trigger>,
     pub response: Option<Response>,
 }
 
@@ -120,6 +121,8 @@ where
         .collect()
 }
 
+const PROPIXXBIT: usize = 12;
+
 fn find_stimulus_indices<S, T>(triggers: &[Trigger], to_stimulus: T) -> Vec<(usize, S)>
 where
     T: Fn(&Trigger) -> Option<S>,
@@ -131,7 +134,7 @@ where
         .filter_map(|(index, trigger)| {
             if let Some(stimulus) = to_stimulus(&Trigger {
                 time_microseconds: trigger.time_microseconds,
-                code: trigger.code & !(1 << 12),
+                code: trigger.code & !(1 << PROPIXXBIT),
             }) {
                 if last_stimulus_time_microseconds
                     .is_some_and(|u| trigger.time_microseconds - u <= 16000)
@@ -154,6 +157,13 @@ fn triggers_to_trial<S>(
     button_choices: &std::collections::BTreeSet<Button>,
 ) -> Trial<S> {
     let stimulus_trigger = &triggers[0];
+    let propixx_trigger = triggers
+        .iter()
+        .find(|t| {
+            has_bit_set(t.code, PROPIXXBIT)
+                && t.time_microseconds - stimulus_trigger.time_microseconds <= 25_000
+        })
+        .cloned();
     let response = triggers.iter().find_map(|trigger| {
         let mut chosen_buttons = button_choices
             .iter()
@@ -175,6 +185,7 @@ fn triggers_to_trial<S>(
     Trial {
         stimulus,
         stimulus_trigger: stimulus_trigger.clone(),
+        propixx_trigger,
         response,
     }
 }
@@ -329,6 +340,7 @@ Someone put something unexpected on this line
                         time_microseconds: 373920000,
                         code: 42
                     },
+                    propixx_trigger: None,
                     response: Some(Response {
                         trigger: Trigger {
                             time_microseconds: 376340992,
@@ -343,6 +355,7 @@ Someone put something unexpected on this line
                         time_microseconds: 377353984,
                         code: 42
                     },
+                    propixx_trigger: None,
                     response: Some(Response {
                         trigger: Trigger {
                             time_microseconds: 378139008,
@@ -406,6 +419,10 @@ Someone put something unexpected on this line
                         time_microseconds: 9697000,
                         code: 40
                     },
+                    propixx_trigger: Some(Trigger {
+                        time_microseconds: 9705000,
+                        code: 4136
+                    }),
                     response: Some(Response {
                         trigger: Trigger {
                             time_microseconds: 10676000,
@@ -420,6 +437,10 @@ Someone put something unexpected on this line
                         time_microseconds: 14299000,
                         code: 40
                     },
+                    propixx_trigger: Some(Trigger {
+                        time_microseconds: 14307000,
+                        code: 4136
+                    }),
                     response: Some(Response {
                         trigger: Trigger {
                             time_microseconds: 15053000,
@@ -499,6 +520,10 @@ Someone put something unexpected on this line
                         time_microseconds: 9705000,
                         code: 4136
                     },
+                    propixx_trigger: Some(Trigger {
+                        time_microseconds: 9705000,
+                        code: 4136
+                    }),
                     response: Some(Response {
                         trigger: Trigger {
                             time_microseconds: 10676000,
@@ -513,6 +538,10 @@ Someone put something unexpected on this line
                         time_microseconds: 14307000,
                         code: 4136
                     },
+                    propixx_trigger: Some(Trigger {
+                        time_microseconds: 14307000,
+                        code: 4136
+                    }),
                     response: Some(Response {
                         trigger: Trigger {
                             time_microseconds: 15053000,
@@ -584,6 +613,10 @@ Someone put something unexpected on this line
                         time_microseconds: 9697000,
                         code: 40
                     },
+                    propixx_trigger: Some(Trigger {
+                        time_microseconds: 9705000,
+                        code: 4136
+                    }),
                     response: Some(Response {
                         trigger: Trigger {
                             time_microseconds: 10676000,
@@ -598,6 +631,10 @@ Someone put something unexpected on this line
                         time_microseconds: 14299000,
                         code: 40
                     },
+                    propixx_trigger: Some(Trigger {
+                        time_microseconds: 14307000,
+                        code: 4136
+                    }),
                     response: Some(Response {
                         trigger: Trigger {
                             time_microseconds: 15053000,
@@ -685,6 +722,10 @@ Someone put something unexpected on this line
                         time_microseconds: 39907000,
                         code: 42
                     },
+                    propixx_trigger: Some(Trigger {
+                        time_microseconds: 39917000,
+                        code: 4138
+                    }),
                     response: Some(Response {
                         trigger: Trigger {
                             time_microseconds: 42158000,
@@ -699,6 +740,10 @@ Someone put something unexpected on this line
                         time_microseconds: 44202000,
                         code: 44
                     },
+                    propixx_trigger: Some(Trigger {
+                        time_microseconds: 44219000,
+                        code: 4096
+                    }),
                     response: Some(Response {
                         trigger: Trigger {
                             time_microseconds: 45812000,
@@ -766,6 +811,10 @@ Someone put something unexpected on this line
                     code: 23,
                     time_microseconds: 291763008
                 },
+                propixx_trigger: Some(Trigger {
+                    code: 4103,
+                    time_microseconds: 291775008
+                }),
                 response: Some(Response {
                     choice: Choice::Clearly(Button::Two),
                     trigger: Trigger {
@@ -829,6 +878,7 @@ Someone put something unexpected on this line
                         time_microseconds: 373920000,
                         code: 1
                     },
+                    propixx_trigger: None,
                     response: Some(Response {
                         trigger: Trigger {
                             time_microseconds: 376340992,
@@ -843,6 +893,7 @@ Someone put something unexpected on this line
                         time_microseconds: 377353984,
                         code: 3
                     },
+                    propixx_trigger: None,
                     response: Some(Response {
                         trigger: Trigger {
                             time_microseconds: 378139008,
@@ -857,6 +908,7 @@ Someone put something unexpected on this line
                         time_microseconds: 88,
                         code: 5
                     },
+                    propixx_trigger: None,
                     response: None
                 },
                 Trial {
@@ -865,6 +917,7 @@ Someone put something unexpected on this line
                         time_microseconds: 12,
                         code: 6
                     },
+                    propixx_trigger: None,
                     response: Some(Response {
                         trigger: Trigger {
                             time_microseconds: 35,
