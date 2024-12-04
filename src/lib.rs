@@ -172,15 +172,23 @@ fn triggers_to_trial<S>(
                 && t.time_microseconds - stimulus_trigger.time_microseconds <= 34_000
         })
         .cloned();
-    let response = triggers.iter().find_map(|trigger| {
+    let response = triggers.windows(2).find_map(|window| {
+        let previous_trigger = &window[0];
+        let trigger = &window[1];
         let mut chosen_buttons = button_choices
             .iter()
             .filter(|button| has_bit_set(trigger.code, button_bit(button)));
         if let Some(button) = chosen_buttons.next() {
-            Some(match chosen_buttons.next() {
-                Some(_) => Choice::Ambiguous,
-                None => Choice::Clearly(button.clone()),
-            })
+            match chosen_buttons.next() {
+                Some(_) => Some(Choice::Ambiguous),
+                None => {
+                    if has_bit_set(previous_trigger.code, button_bit(button)) {
+                        None
+                    } else {
+                        Some(Choice::Clearly(button.clone()))
+                    }
+                }
+            }
         } else {
             None
         }
