@@ -182,7 +182,9 @@ fn triggers_to_trial<S>(
             match chosen_buttons.next() {
                 Some(_) => Some(Choice::Ambiguous),
                 None => {
-                    if has_bit_set(previous_trigger.code, button_bit(button)) {
+                    if has_bit_set(previous_trigger.code, button_bit(button))
+                        && trigger.code != (1 << button_bit(button))
+                    {
                         None
                     } else {
                         Some(Choice::Clearly(button.clone()))
@@ -1020,6 +1022,87 @@ Someone put something unexpected on this line
                     Trigger {
                         time_microseconds: 18330000,
                         code: 4363
+                    },
+                ],
+                |trigger| match trigger.code {
+                    11 => Some("a"),
+                    _ => None,
+                },
+                &std::collections::BTreeSet::from([Button::One])
+            )
+        )
+    }
+
+    #[test]
+    fn finds_trials_masked_by_button_2() {
+        assert_eq!(
+            vec![
+                Trial {
+                    stimulus: "a",
+                    stimulus_trigger: Trigger {
+                        time_microseconds: 64516000,
+                        code: 11
+                    },
+                    propixx_trigger: Some(Trigger {
+                        time_microseconds: 64527000,
+                        code: 4363
+                    }),
+                    response: Some(Response {
+                        trigger: Trigger {
+                            time_microseconds: 64521000,
+                            code: 267
+                        },
+                        choice: Choice::Clearly(Button::One)
+                    })
+                },
+                Trial {
+                    stimulus: "a",
+                    stimulus_trigger: Trigger {
+                        time_microseconds: 68716000,
+                        code: 267
+                    },
+                    propixx_trigger: Some(Trigger {
+                        time_microseconds: 68730000,
+                        code: 4352
+                    }),
+                    response: Some(Response {
+                        trigger: Trigger {
+                            time_microseconds: 72906000,
+                            code: 256
+                        },
+                        choice: Choice::Clearly(Button::One)
+                    })
+                }
+            ],
+            find_trials(
+                &[
+                    Trigger {
+                        time_microseconds: 64516000,
+                        code: 11
+                    },
+                    Trigger {
+                        time_microseconds: 64521000,
+                        code: 267
+                    },
+                    Trigger {
+                        time_microseconds: 64527000,
+                        code: 4363
+                    },
+                    Trigger {
+                        time_microseconds: 68634000,
+                        code: 256
+                    },
+                    Trigger {
+                        time_microseconds: 68716000,
+                        code: 267
+                    },
+                    Trigger {
+                        time_microseconds: 68730000,
+                        code: 4352
+                    },
+                    Trigger {
+                        time_microseconds: 72906000,
+                        code: 256
                     },
                 ],
                 |trigger| match trigger.code {
