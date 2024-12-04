@@ -106,7 +106,7 @@ pub fn find_trials<S, T>(
 where
     T: Fn(&Trigger) -> Option<S>,
 {
-    let indexed_stimuli = find_stimulus_indices(&triggers, to_stimulus);
+    let indexed_stimuli = find_stimulus_indices(&triggers, to_stimulus, button_choices);
     let bounds: Vec<_> = indexed_stimuli
         .iter()
         .map(|(i, _)| *i)
@@ -123,7 +123,11 @@ where
 
 const PROPIXXBIT: usize = 12;
 
-fn find_stimulus_indices<S, T>(triggers: &[Trigger], to_stimulus: T) -> Vec<(usize, S)>
+fn find_stimulus_indices<S, T>(
+    triggers: &[Trigger],
+    to_stimulus: T,
+    button_choices: &std::collections::BTreeSet<Button>,
+) -> Vec<(usize, S)>
 where
     T: Fn(&Trigger) -> Option<S>,
 {
@@ -134,7 +138,11 @@ where
         .filter_map(|(index, trigger)| {
             if let Some(stimulus) = to_stimulus(&Trigger {
                 time_microseconds: trigger.time_microseconds,
-                code: trigger.code & !(1 << PROPIXXBIT),
+                code: trigger.code
+                    & !(1 << PROPIXXBIT)
+                    & !button_choices
+                        .iter()
+                        .fold(0, |a, b| a | (1 << button_bit(b))),
             }) {
                 if last_stimulus_time_microseconds
                     .is_some_and(|u| trigger.time_microseconds - u <= 16000)
@@ -940,6 +948,77 @@ Someone put something unexpected on this line
                     _ => None,
                 },
                 &std::collections::BTreeSet::from([Button::One, Button::Two])
+            )
+        )
+    }
+
+    #[test]
+    fn finds_trials_masked_by_button() {
+        assert_eq!(
+            vec![
+                Trial {
+                    stimulus: "a",
+                    stimulus_trigger: Trigger {
+                        time_microseconds: 14119000,
+                        code: 11
+                    },
+                    propixx_trigger: Some(Trigger {
+                        time_microseconds: 14126000,
+                        code: 4107
+                    }),
+                    response: Some(Response {
+                        trigger: Trigger {
+                            time_microseconds: 14171000,
+                            code: 4352
+                        },
+                        choice: Choice::Clearly(Button::One)
+                    })
+                },
+                Trial {
+                    stimulus: "a",
+                    stimulus_trigger: Trigger {
+                        time_microseconds: 18319000,
+                        code: 267
+                    },
+                    propixx_trigger: Some(Trigger {
+                        time_microseconds: 18330000,
+                        code: 4363
+                    }),
+                    response: None
+                }
+            ],
+            find_trials(
+                &[
+                    Trigger {
+                        time_microseconds: 14119000,
+                        code: 11
+                    },
+                    Trigger {
+                        time_microseconds: 14126000,
+                        code: 4107
+                    },
+                    Trigger {
+                        time_microseconds: 14171000,
+                        code: 4352
+                    },
+                    Trigger {
+                        time_microseconds: 18284000,
+                        code: 256
+                    },
+                    Trigger {
+                        time_microseconds: 18319000,
+                        code: 267
+                    },
+                    Trigger {
+                        time_microseconds: 18330000,
+                        code: 4363
+                    },
+                ],
+                |trigger| match trigger.code {
+                    11 => Some("a"),
+                    _ => None,
+                },
+                &std::collections::BTreeSet::from([Button::One])
             )
         )
     }
