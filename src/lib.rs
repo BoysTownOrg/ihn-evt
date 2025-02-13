@@ -159,7 +159,7 @@ where
         .collect()
 }
 
-fn triggers_to_trial<S>(
+pub fn triggers_to_trial<S>(
     triggers: &[Trigger],
     stimulus: S,
     button_choices: &std::collections::BTreeSet<Button>,
