@@ -68,7 +68,7 @@ pub fn parse_triggers(input: &str) -> anyhow::Result<Vec<Trigger>> {
 }
 
 fn parse_trigger_line(line: &str) -> anyhow::Result<Trigger> {
-    let mut tokens = line.trim().split_whitespace();
+    let mut tokens = line.split_whitespace();
     let time_microseconds = tokens
         .next()
         .ok_or(anyhow!("missing time (Tmu)"))?
@@ -106,17 +106,17 @@ pub fn find_trials<S, T>(
 where
     T: Fn(&Trigger) -> Option<S>,
 {
-    let indexed_stimuli = find_stimulus_indices(&triggers, to_stimulus, button_choices);
+    let indexed_stimuli = find_stimulus_indices(triggers, to_stimulus, button_choices);
     let bounds: Vec<_> = indexed_stimuli
         .iter()
         .map(|(i, _)| *i)
-        .chain([triggers.len()].into_iter())
+        .chain([triggers.len()])
         .collect();
     bounds
         .windows(2)
         .zip(indexed_stimuli.into_iter().map(|(_, stimulus)| stimulus))
         .map(|(window, stimulus)| {
-            triggers_to_trial(&triggers[window[0]..window[1]], stimulus, &button_choices)
+            triggers_to_trial(&triggers[window[0]..window[1]], stimulus, button_choices)
         })
         .collect()
 }
@@ -133,7 +133,7 @@ where
 {
     let mut last_stimulus_time_microseconds = None;
     triggers
-        .into_iter()
+        .iter()
         .enumerate()
         .filter_map(|(index, trigger)| {
             if let Some(stimulus) = to_stimulus(&Trigger {
@@ -276,7 +276,7 @@ pub fn reaction_time_stats<T: Iterator<Item = Evaluation> + Clone>(
             / (rt_count - 1) as f64;
         variance.sqrt()
     } else {
-        std::f64::NAN
+        f64::NAN
     };
 
     ReactionTimeStats { mean_ms, std_ms }
@@ -1307,21 +1307,21 @@ Someone put something unexpected on this line
             ]
             .into_iter(),
         );
-        assert_eq!(true, stats.std_ms.is_nan());
-        assert_eq!(true, stats.mean_ms.is_nan());
+        assert!(stats.std_ms.is_nan());
+        assert!(stats.mean_ms.is_nan());
     }
 
     #[test]
     fn calculates_accuracy_none() {
         let acc = accuracy([].into_iter());
-        assert_eq!(true, acc.percent.is_nan());
+        assert!(acc.percent.is_nan());
         assert_eq!(0, acc.count);
     }
 
     #[test]
     fn calculates_rt_stats_none() {
         let stats = reaction_time_stats([].into_iter());
-        assert_eq!(true, stats.std_ms.is_nan());
-        assert_eq!(true, stats.mean_ms.is_nan());
+        assert!(stats.std_ms.is_nan());
+        assert!(stats.mean_ms.is_nan());
     }
 }
