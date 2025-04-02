@@ -172,7 +172,21 @@ pub fn triggers_to_trial<S>(
                 && t.time_microseconds - stimulus_trigger.time_microseconds <= 34_000
         })
         .cloned();
-    let response = triggers.windows(2).find_map(|window| {
+    let response = find_response(triggers, button_choices);
+
+    Trial {
+        stimulus,
+        stimulus_trigger: stimulus_trigger.clone(),
+        propixx_trigger,
+        response,
+    }
+}
+
+pub fn find_response(
+    triggers: &[Trigger],
+    button_choices: &std::collections::BTreeSet<Button>,
+) -> Option<Response> {
+    triggers.windows(2).find_map(|window| {
         let previous_trigger = &window[0];
         let trigger = &window[1];
         let mut chosen_buttons = button_choices
@@ -198,14 +212,7 @@ pub fn triggers_to_trial<S>(
             choice,
             trigger: trigger.clone(),
         })
-    });
-
-    Trial {
-        stimulus,
-        stimulus_trigger: stimulus_trigger.clone(),
-        propixx_trigger,
-        response,
-    }
+    })
 }
 
 fn button_bit(button: &Button) -> usize {
