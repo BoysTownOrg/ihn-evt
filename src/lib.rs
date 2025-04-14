@@ -2,7 +2,7 @@ use anyhow::{anyhow, Context};
 
 type Microseconds = i64;
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub struct Trigger {
     pub time_microseconds: Microseconds,
     pub code: i32,
@@ -14,6 +14,7 @@ pub struct Trial<S> {
     pub stimulus_trigger: Trigger,
     pub propixx_trigger: Option<Trigger>,
     pub response: Option<Response>,
+    pub evaluation: Evaluation,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -35,14 +36,20 @@ pub enum Choice {
     Ambiguous,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub struct ReactionTime {
     pub microseconds: Microseconds,
 }
 
 #[derive(Debug, PartialEq, Clone)]
+pub struct ReactionTimes {
+    stimulus: ReactionTime,
+    propixx: Option<ReactionTime>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
 pub enum Evaluation {
-    Correct(ReactionTime),
+    Correct(ReactionTimes),
     Incorrect,
 }
 
@@ -58,7 +65,7 @@ pub struct Accuracy {
     pub count: usize,
 }
 
-pub fn parse_triggers(input: &str) -> anyhow::Result<Vec<Trigger>> {
+fn parse_triggers(input: &str) -> anyhow::Result<Vec<Trigger>> {
     input
         .lines()
         .enumerate()
@@ -98,27 +105,35 @@ where
     Ok(())
 }
 
-pub fn find_trials<S, T>(
-    triggers: &[Trigger],
+pub fn find_trials<S, T, Q>(
+    input: &str,
     to_stimulus: T,
-    button_choices: &std::collections::BTreeSet<Button>,
-) -> Vec<Trial<S>>
+    button_choices: &[Button],
+    button_is_correct: Q,
+) -> anyhow::Result<Vec<Trial<S>>>
 where
     T: Fn(&Trigger) -> Option<S>,
+    Q: Fn(&Button, &S) -> bool,
 {
-    let indexed_stimuli = find_stimulus_indices(triggers, to_stimulus, button_choices);
+    let triggers = parse_triggers(input)?;
+    let indexed_stimuli = find_stimulus_indices(&triggers, to_stimulus, button_choices);
     let bounds: Vec<_> = indexed_stimuli
         .iter()
         .map(|(i, _)| *i)
         .chain([triggers.len()])
         .collect();
-    bounds
+    Ok(bounds
         .windows(2)
         .zip(indexed_stimuli.into_iter().map(|(_, stimulus)| stimulus))
         .map(|(window, stimulus)| {
-            triggers_to_trial(&triggers[window[0]..window[1]], stimulus, button_choices)
+            triggers_to_trial(
+                &triggers[window[0]..window[1]],
+                stimulus,
+                button_choices,
+                &button_is_correct,
+            )
         })
-        .collect()
+        .collect())
 }
 
 const PROPIXXBIT: usize = 12;
@@ -126,7 +141,7 @@ const PROPIXXBIT: usize = 12;
 fn find_stimulus_indices<S, T>(
     triggers: &[Trigger],
     to_stimulus: T,
-    button_choices: &std::collections::BTreeSet<Button>,
+    button_choices: &[Button],
 ) -> Vec<(usize, S)>
 where
     T: Fn(&Trigger) -> Option<S>,
@@ -159,12 +174,16 @@ where
         .collect()
 }
 
-pub fn triggers_to_trial<S>(
+fn triggers_to_trial<S, Q>(
     triggers: &[Trigger],
     stimulus: S,
-    button_choices: &std::collections::BTreeSet<Button>,
-) -> Trial<S> {
-    let stimulus_trigger = &triggers[0];
+    button_choices: &[Button],
+    button_is_correct: &Q,
+) -> Trial<S>
+where
+    Q: Fn(&Button, &S) -> bool,
+{
+    let stimulus_trigger = triggers[0];
     let propixx_trigger = triggers
         .iter()
         .find(|t| {
@@ -173,22 +192,36 @@ pub fn triggers_to_trial<S>(
         })
         .cloned();
     let response = find_response(triggers, button_choices);
+    let mut evaluation = Evaluation::Incorrect;
+    if let Some(response) = &response {
+        if let Choice::Clearly(button) = &response.choice {
+            if button_is_correct(button, &stimulus) {
+                evaluation = Evaluation::Correct(ReactionTimes {
+                    stimulus: ReactionTime {
+                        microseconds: response.trigger.time_microseconds
+                            - stimulus_trigger.time_microseconds,
+                    },
+                    propixx: propixx_trigger.map(|t| ReactionTime {
+                        microseconds: response.trigger.time_microseconds - t.time_microseconds,
+                    }),
+                });
+            }
+        }
+    }
 
     Trial {
         stimulus,
-        stimulus_trigger: stimulus_trigger.clone(),
+        stimulus_trigger,
         propixx_trigger,
         response,
+        evaluation,
     }
 }
 
-pub fn find_response(
-    triggers: &[Trigger],
-    button_choices: &std::collections::BTreeSet<Button>,
-) -> Option<Response> {
+fn find_response(triggers: &[Trigger], button_choices: &[Button]) -> Option<Response> {
     triggers.windows(2).find_map(|window| {
         let previous_trigger = &window[0];
-        let trigger = &window[1];
+        let trigger = window[1];
         let mut chosen_buttons = button_choices
             .iter()
             .filter(|button| has_bit_set(trigger.code, button_bit(button)));
@@ -208,10 +241,7 @@ pub fn find_response(
         } else {
             None
         }
-        .map(|choice| Response {
-            choice,
-            trigger: trigger.clone(),
-        })
+        .map(|choice| Response { choice, trigger })
     })
 }
 
@@ -225,23 +255,6 @@ fn button_bit(button: &Button) -> usize {
 
 fn has_bit_set(x: i32, n: usize) -> bool {
     x & (1 << n) != 0
-}
-
-pub fn evaluate_trial<S, Q>(trial: &Trial<S>, button_is_correct: Q) -> Evaluation
-where
-    Q: Fn(&Button, &S) -> bool,
-{
-    if let Some(response) = &trial.response {
-        if let Choice::Clearly(button) = &response.choice {
-            if button_is_correct(button, &trial.stimulus) {
-                return Evaluation::Correct(ReactionTime {
-                    microseconds: response.trigger.time_microseconds
-                        - trial.stimulus_trigger.time_microseconds,
-                });
-            }
-        }
-    }
-    Evaluation::Incorrect
 }
 
 pub fn accuracy<T: Iterator<Item = Evaluation> + Clone>(evaluations: T) -> Accuracy {
@@ -261,11 +274,15 @@ pub fn accuracy<T: Iterator<Item = Evaluation> + Clone>(evaluations: T) -> Accur
 // f64 can represent all integers less than or equal to 2^53.
 // This includes all integer microsecond values less than 285 years.
 // You're not going to lose precision by casting a microsecond value to a f64 here.
-pub fn reaction_time_stats<T: Iterator<Item = Evaluation> + Clone>(
+pub fn reaction_time_stats<T: Iterator<Item = Evaluation> + Clone, U>(
     evaluations: T,
-) -> ReactionTimeStats {
+    get_reaction_time: U,
+) -> ReactionTimeStats
+where
+    U: Fn(&ReactionTimes) -> ReactionTime,
+{
     let reaction_times_ms = evaluations.clone().flat_map(|e| match e {
-        Evaluation::Correct(rt) => Some(rt.microseconds as f64 / 1000.),
+        Evaluation::Correct(rt) => Some(get_reaction_time(&rt).microseconds as f64 / 1000.),
         Evaluation::Incorrect => None,
     });
     let rt_sum_ms = reaction_times_ms.clone().sum::<f64>();
@@ -296,7 +313,6 @@ pub fn reaction_time_is_outlier(stats: &ReactionTimeStats, rt: &ReactionTime) ->
 #[cfg(test)]
 mod tests {
     use super::accuracy;
-    use super::evaluate_trial;
     use super::find_trials;
     use super::parse_triggers;
     use super::reaction_time_stats;
@@ -306,6 +322,7 @@ mod tests {
     use super::Evaluation;
     use super::ReactionTime;
     use super::ReactionTimeStats;
+    use super::ReactionTimes;
     use super::Response;
     use super::Trial;
     use super::Trigger;
@@ -372,7 +389,8 @@ Someone put something unexpected on this line
                             code: 512
                         },
                         choice: Choice::Clearly(Button::Two)
-                    })
+                    }),
+                    evaluation: Evaluation::Incorrect
                 },
                 Trial {
                     stimulus: "hello",
@@ -387,50 +405,29 @@ Someone put something unexpected on this line
                             code: 256
                         },
                         choice: Choice::Clearly(Button::One)
-                    })
+                    }),
+                    evaluation: Evaluation::Incorrect
                 }
             ],
             find_trials(
-                &[
-                    Trigger {
-                        time_microseconds: 372508992,
-                        code: 60
-                    },
-                    Trigger {
-                        time_microseconds: 372521984,
-                        code: 4096
-                    },
-                    Trigger {
-                        time_microseconds: 373920000,
-                        code: 42
-                    },
-                    Trigger {
-                        time_microseconds: 375921984,
-                        code: 60
-                    },
-                    Trigger {
-                        time_microseconds: 375932000,
-                        code: 4156
-                    },
-                    Trigger {
-                        time_microseconds: 376340992,
-                        code: 512
-                    },
-                    Trigger {
-                        time_microseconds: 377353984,
-                        code: 42
-                    },
-                    Trigger {
-                        time_microseconds: 378139008,
-                        code: 256
-                    },
-                ],
+                "Tmu         	Code	TriNo	Comnt	Ver-C
+372508992	1	60	FIFF Trigger: 60
+372521984	1	4096	FIFF Trigger: 4096
+373920000	1	42	FIFF Trigger: 42
+375921984	1	60	FIFF Trigger: 60
+375932000	1	4156	FIFF Trigger: 4156
+376340992	1	512	FIFF Trigger: 512
+377353984	1	42	FIFF Trigger: 42
+378139008	1	256	FIFF Trigger: 256
+",
                 |trigger| match trigger.code {
                     42 => Some("hello"),
                     _ => None,
                 },
-                &std::collections::BTreeSet::from([Button::One, Button::Two])
+                &[Button::One, Button::Two],
+                |_, _| false
             )
+            .unwrap()
         )
     }
 
@@ -454,7 +451,8 @@ Someone put something unexpected on this line
                             code: 512
                         },
                         choice: Choice::Clearly(Button::Two)
-                    })
+                    }),
+                    evaluation: Evaluation::Incorrect
                 },
                 Trial {
                     stimulus: "hello",
@@ -472,66 +470,33 @@ Someone put something unexpected on this line
                             code: 256
                         },
                         choice: Choice::Clearly(Button::One)
-                    })
+                    }),
+                    evaluation: Evaluation::Incorrect
                 }
             ],
             find_trials(
-                &[
-                    Trigger {
-                        time_microseconds: 6547000,
-                        code: 4156
-                    },
-                    Trigger {
-                        time_microseconds: 7700000,
-                        code: 32
-                    },
-                    Trigger {
-                        time_microseconds: 7720000,
-                        code: 4096
-                    },
-                    Trigger {
-                        time_microseconds: 9697000,
-                        code: 40
-                    },
-                    Trigger {
-                        time_microseconds: 9705000,
-                        code: 4136
-                    },
-                    Trigger {
-                        time_microseconds: 10676000,
-                        code: 512
-                    },
-                    Trigger {
-                        time_microseconds: 10699000,
-                        code: 4156
-                    },
-                    Trigger {
-                        time_microseconds: 12302000,
-                        code: 31
-                    },
-                    Trigger {
-                        time_microseconds: 12323000,
-                        code: 4096
-                    },
-                    Trigger {
-                        time_microseconds: 14299000,
-                        code: 40
-                    },
-                    Trigger {
-                        time_microseconds: 14307000,
-                        code: 4136
-                    },
-                    Trigger {
-                        time_microseconds: 15053000,
-                        code: 256
-                    },
-                ],
+                "Tmu         	Code	TriNo	Comnt	Ver-C
+6547000	1	4156	FIFF Trigger: 4156
+7700000	1	32	FIFF Trigger: 32
+7720000	1	4096	FIFF Trigger: 4096
+9697000	1	40	FIFF Trigger: 40
+9705000	1	4136	FIFF Trigger: 4136
+10676000	1	512	FIFF Trigger: 512
+10699000	1	4156	FIFF Trigger: 4156
+12302000	1	31	FIFF Trigger: 31
+12323000	1	4096	FIFF Trigger: 4096
+14299000	1	40	FIFF Trigger: 40
+14307000	1	4136	FIFF Trigger: 4136
+15053000	1	256	FIFF Trigger: 256
+",
                 |trigger| match trigger.code {
                     40 => Some("hello"),
                     _ => None,
                 },
-                &std::collections::BTreeSet::from([Button::One, Button::Two, Button::Three])
+                &[Button::One, Button::Two, Button::Three],
+                |_, _| false
             )
+            .unwrap()
         )
     }
 
@@ -555,7 +520,8 @@ Someone put something unexpected on this line
                             code: 512
                         },
                         choice: Choice::Clearly(Button::Two)
-                    })
+                    }),
+                    evaluation: Evaluation::Incorrect
                 },
                 Trial {
                     stimulus: "hello",
@@ -573,58 +539,31 @@ Someone put something unexpected on this line
                             code: 256
                         },
                         choice: Choice::Clearly(Button::One)
-                    })
+                    }),
+                    evaluation: Evaluation::Incorrect
                 }
             ],
             find_trials(
-                &[
-                    Trigger {
-                        time_microseconds: 6547000,
-                        code: 4156
-                    },
-                    Trigger {
-                        time_microseconds: 7700000,
-                        code: 32
-                    },
-                    Trigger {
-                        time_microseconds: 7720000,
-                        code: 4096
-                    },
-                    Trigger {
-                        time_microseconds: 9705000,
-                        code: 4136
-                    },
-                    Trigger {
-                        time_microseconds: 10676000,
-                        code: 512
-                    },
-                    Trigger {
-                        time_microseconds: 10699000,
-                        code: 4156
-                    },
-                    Trigger {
-                        time_microseconds: 12302000,
-                        code: 31
-                    },
-                    Trigger {
-                        time_microseconds: 12323000,
-                        code: 4096
-                    },
-                    Trigger {
-                        time_microseconds: 14307000,
-                        code: 4136
-                    },
-                    Trigger {
-                        time_microseconds: 15053000,
-                        code: 256
-                    },
-                ],
+                "Tmu         	Code	TriNo	Comnt	Ver-C
+6547000	1	4156	FIFF Trigger: 4156
+7700000	1	32	FIFF Trigger: 32
+7720000	1	4096	FIFF Trigger: 4096
+9705000	1	4136	FIFF Trigger: 4136
+10676000	1	512	FIFF Trigger: 512
+10699000	1	4156	FIFF Trigger: 4156
+12302000	1	31	FIFF Trigger: 31
+12323000	1	4096	FIFF Trigger: 4096
+14307000	1	4136	FIFF Trigger: 4136
+15053000	1	256	FIFF Trigger: 256
+",
                 |trigger| match trigger.code {
                     40 => Some("hello"),
                     _ => None,
                 },
-                &std::collections::BTreeSet::from([Button::One, Button::Two, Button::Three])
+                &[Button::One, Button::Two, Button::Three],
+                |_, _| false
             )
+            .unwrap()
         )
     }
 
@@ -648,7 +587,8 @@ Someone put something unexpected on this line
                             code: 512
                         },
                         choice: Choice::Clearly(Button::Two)
-                    })
+                    }),
+                    evaluation: Evaluation::Incorrect
                 },
                 Trial {
                     stimulus: "hello",
@@ -666,74 +606,35 @@ Someone put something unexpected on this line
                             code: 256
                         },
                         choice: Choice::Clearly(Button::One)
-                    })
+                    }),
+                    evaluation: Evaluation::Incorrect
                 }
             ],
             find_trials(
-                &[
-                    Trigger {
-                        time_microseconds: 6547000,
-                        code: 4156
-                    },
-                    Trigger {
-                        time_microseconds: 7700000,
-                        code: 32
-                    },
-                    Trigger {
-                        time_microseconds: 7720000,
-                        code: 4096
-                    },
-                    Trigger {
-                        time_microseconds: 9697000,
-                        code: 40
-                    },
-                    Trigger {
-                        time_microseconds: 9698000,
-                        code: 40
-                    },
-                    Trigger {
-                        time_microseconds: 9705000,
-                        code: 4136
-                    },
-                    Trigger {
-                        time_microseconds: 10676000,
-                        code: 512
-                    },
-                    Trigger {
-                        time_microseconds: 10699000,
-                        code: 4156
-                    },
-                    Trigger {
-                        time_microseconds: 12302000,
-                        code: 31
-                    },
-                    Trigger {
-                        time_microseconds: 12323000,
-                        code: 4096
-                    },
-                    Trigger {
-                        time_microseconds: 14299000,
-                        code: 40
-                    },
-                    Trigger {
-                        time_microseconds: 14300000,
-                        code: 40
-                    },
-                    Trigger {
-                        time_microseconds: 14307000,
-                        code: 4136
-                    },
-                    Trigger {
-                        time_microseconds: 15053000,
-                        code: 256
-                    },
-                ],
+                "Tmu         	Code	TriNo	Comnt	Ver-C
+6547000	1	4156	FIFF Trigger: 4156
+7700000	1	32	FIFF Trigger: 32
+7720000	1	4096	FIFF Trigger: 4096
+9697000	1	40	FIFF Trigger: 40
+9698000	1	40	FIFF Trigger: 40
+9705000	1	4136	FIFF Trigger: 4136
+10676000	1	512	FIFF Trigger: 512
+10699000	1	4156	FIFF Trigger: 4156
+12302000	1	31	FIFF Trigger: 31
+12323000	1	4096	FIFF Trigger: 4096
+14299000	1	40	FIFF Trigger: 40
+14300000	1	40	FIFF Trigger: 40
+14307000	1	4136	FIFF Trigger: 4136
+15053000	1	256	FIFF Trigger: 256
+",
                 |trigger| match trigger.code {
                     40 => Some("hello"),
                     _ => None,
                 },
-                &std::collections::BTreeSet::from([Button::One, Button::Two, Button::Three])
+                &[Button::One, Button::Two, Button::Three],
+                |_, _| false
             )
+            .unwrap()
         )
     }
 
@@ -757,7 +658,8 @@ Someone put something unexpected on this line
                             code: 256
                         },
                         choice: Choice::Clearly(Button::One)
-                    })
+                    }),
+                    evaluation: Evaluation::Incorrect
                 },
                 Trial {
                     stimulus: "b",
@@ -775,55 +677,31 @@ Someone put something unexpected on this line
                             code: 512
                         },
                         choice: Choice::Clearly(Button::Two)
-                    })
+                    }),
+                    evaluation: Evaluation::Incorrect
                 }
             ],
             find_trials(
-                &[
-                    Trigger {
-                        time_microseconds: 38153000,
-                        code: 4146
-                    },
-                    Trigger {
-                        time_microseconds: 39907000,
-                        code: 42
-                    },
-                    Trigger {
-                        time_microseconds: 39913000,
-                        code: 46
-                    },
-                    Trigger {
-                        time_microseconds: 39917000,
-                        code: 4138
-                    },
-                    Trigger {
-                        time_microseconds: 42158000,
-                        code: 256
-                    },
-                    Trigger {
-                        time_microseconds: 42610000,
-                        code: 4146
-                    },
-                    Trigger {
-                        time_microseconds: 44202000,
-                        code: 44
-                    },
-                    Trigger {
-                        time_microseconds: 44219000,
-                        code: 4096
-                    },
-                    Trigger {
-                        time_microseconds: 45812000,
-                        code: 512
-                    },
-                ],
+                "Tmu         	Code	TriNo	Comnt	Ver-C
+38153000	1	4146	FIFF Trigger: 4146
+39907000	1	42	FIFF Trigger: 42
+39913000	1	46	FIFF Trigger: 46
+39917000	1	4138	FIFF Trigger: 4138
+42158000	1	256	FIFF Trigger: 256
+42610000	1	4146	FIFF Trigger: 4146
+44202000	1	44	FIFF Trigger: 44
+44219000	1	4096	FIFF Trigger: 4096
+45812000	1	512	FIFF Trigger: 512
+",
                 |trigger| match trigger.code {
                     42 => Some("a"),
                     44 => Some("b"),
                     _ => None,
                 },
-                &std::collections::BTreeSet::from([Button::One, Button::Two])
+                &[Button::One, Button::Two],
+                |_, _| false
             )
+            .unwrap()
         )
     }
 
@@ -846,31 +724,17 @@ Someone put something unexpected on this line
                         code: 512,
                         time_microseconds: 292801984
                     }
-                })
+                }),
+                evaluation: Evaluation::Incorrect
             },],
             find_trials(
-                &[
-                    Trigger {
-                        code: 4156,
-                        time_microseconds: 289998016
-                    },
-                    Trigger {
-                        code: 23,
-                        time_microseconds: 291763008
-                    },
-                    Trigger {
-                        code: 4103,
-                        time_microseconds: 291775008
-                    },
-                    Trigger {
-                        code: 512,
-                        time_microseconds: 292801984
-                    },
-                    Trigger {
-                        code: 4156,
-                        time_microseconds: 293764992
-                    },
-                ],
+                "Tmu         	Code	TriNo	Comnt	Ver-C
+289998016	1	4156	FIFF Trigger: 4156
+291763008	1	23	FIFF Trigger: 23
+291775008	1	4103	FIFF Trigger: 4103
+292801984	1	512	FIFF Trigger: 512
+293764992	1	4156	FIFF Trigger: 4156
+",
                 |t| {
                     let masked = t.code & !(1 << 4);
                     match masked {
@@ -878,8 +742,10 @@ Someone put something unexpected on this line
                         _ => None,
                     }
                 },
-                &std::collections::BTreeSet::from([Button::One, Button::Two])
+                &[Button::One, Button::Two],
+                |_, _| false
             )
+            .unwrap()
         )
     }
 
@@ -903,6 +769,14 @@ Someone put something unexpected on this line
                             time_microseconds: 14023000
                         },
                         choice: Choice::Clearly(Button::Two)
+                    }),
+                    evaluation: Evaluation::Correct(ReactionTimes {
+                        stimulus: ReactionTime {
+                            microseconds: 14023000 - 12450000
+                        },
+                        propixx: Some(ReactionTime {
+                            microseconds: 14023000 - 12476000
+                        })
                     })
                 },
                 Trial {
@@ -921,51 +795,30 @@ Someone put something unexpected on this line
                             time_microseconds: 17501000
                         },
                         choice: Choice::Clearly(Button::One)
-                    })
+                    }),
+                    evaluation: Evaluation::Incorrect
                 }
             ],
             find_trials(
-                &[
-                    Trigger {
-                        code: 4116,
-                        time_microseconds: 10946000
-                    },
-                    Trigger {
-                        code: 34,
-                        time_microseconds: 12450000
-                    },
-                    Trigger {
-                        code: 4096,
-                        time_microseconds: 12476000
-                    },
-                    Trigger {
-                        code: 512,
-                        time_microseconds: 14023000
-                    },
-                    Trigger {
-                        code: 4116,
-                        time_microseconds: 14453000
-                    },
-                    Trigger {
-                        code: 41,
-                        time_microseconds: 16058000
-                    },
-                    Trigger {
-                        code: 4137,
-                        time_microseconds: 16070000
-                    },
-                    Trigger {
-                        code: 256,
-                        time_microseconds: 17501000
-                    },
-                ],
+                "Tmu         	Code	TriNo	Comnt	Ver-C
+10946000	1	4116	FIFF Trigger: 4116
+12450000	1	34	FIFF Trigger: 34
+12476000	1	4096	FIFF Trigger: 4096
+14023000	1	512	FIFF Trigger: 512
+14453000	1	4116	FIFF Trigger: 4116
+16058000	1	41	FIFF Trigger: 41
+16070000	1	4137	FIFF Trigger: 4137
+17501000	1	256	FIFF Trigger: 256
+",
                 |trigger| match trigger.code {
                     34 => Some("a"),
                     41 => Some("b"),
                     _ => None,
                 },
-                &std::collections::BTreeSet::from([Button::One, Button::Two])
+                &[Button::One, Button::Two],
+                |button, _| *button == Button::Two
             )
+            .unwrap()
         )
     }
 
@@ -989,7 +842,8 @@ Someone put something unexpected on this line
                             code: 4352
                         },
                         choice: Choice::Clearly(Button::One)
-                    })
+                    }),
+                    evaluation: Evaluation::Incorrect
                 },
                 Trial {
                     stimulus: "a",
@@ -1001,42 +855,27 @@ Someone put something unexpected on this line
                         time_microseconds: 18330000,
                         code: 4363
                     }),
-                    response: None
+                    response: None,
+                    evaluation: Evaluation::Incorrect
                 }
             ],
             find_trials(
-                &[
-                    Trigger {
-                        time_microseconds: 14119000,
-                        code: 11
-                    },
-                    Trigger {
-                        time_microseconds: 14126000,
-                        code: 4107
-                    },
-                    Trigger {
-                        time_microseconds: 14171000,
-                        code: 4352
-                    },
-                    Trigger {
-                        time_microseconds: 18284000,
-                        code: 256
-                    },
-                    Trigger {
-                        time_microseconds: 18319000,
-                        code: 267
-                    },
-                    Trigger {
-                        time_microseconds: 18330000,
-                        code: 4363
-                    },
-                ],
+                "Tmu         	Code	TriNo	Comnt	Ver-C
+14119000	1	11	FIFF Trigger: 11
+14126000	1	4107	FIFF Trigger: 4107
+14171000	1	4352	FIFF Trigger: 4352
+18284000	1	256	FIFF Trigger: 256
+18319000	1	267	FIFF Trigger: 267
+18330000	1	4363	FIFF Trigger: 4363
+",
                 |trigger| match trigger.code {
                     11 => Some("a"),
                     _ => None,
                 },
-                &std::collections::BTreeSet::from([Button::One])
+                &[Button::One],
+                |_, _| false
             )
+            .unwrap()
         )
     }
 
@@ -1060,7 +899,8 @@ Someone put something unexpected on this line
                             code: 267
                         },
                         choice: Choice::Clearly(Button::One)
-                    })
+                    }),
+                    evaluation: Evaluation::Incorrect
                 },
                 Trial {
                     stimulus: "a",
@@ -1078,127 +918,28 @@ Someone put something unexpected on this line
                             code: 256
                         },
                         choice: Choice::Clearly(Button::One)
-                    })
+                    }),
+                    evaluation: Evaluation::Incorrect
                 }
             ],
             find_trials(
-                &[
-                    Trigger {
-                        time_microseconds: 64516000,
-                        code: 11
-                    },
-                    Trigger {
-                        time_microseconds: 64521000,
-                        code: 267
-                    },
-                    Trigger {
-                        time_microseconds: 64527000,
-                        code: 4363
-                    },
-                    Trigger {
-                        time_microseconds: 68634000,
-                        code: 256
-                    },
-                    Trigger {
-                        time_microseconds: 68716000,
-                        code: 267
-                    },
-                    Trigger {
-                        time_microseconds: 68730000,
-                        code: 4352
-                    },
-                    Trigger {
-                        time_microseconds: 72906000,
-                        code: 256
-                    },
-                ],
+                "Tmu         	Code	TriNo	Comnt	Ver-C
+64516000	1	11	FIFF Trigger: 11
+64521000	1	267	FIFF Trigger: 267
+64527000	1	4363	FIFF Trigger: 4363
+68634000	1	256	FIFF Trigger: 256
+68716000	1	267	FIFF Trigger: 267
+68730000	1	4352	FIFF Trigger: 4352
+72906000	1	256	FIFF Trigger: 256
+",
                 |trigger| match trigger.code {
                     11 => Some("a"),
                     _ => None,
                 },
-                &std::collections::BTreeSet::from([Button::One])
+                &[Button::One],
+                |_, _| false
             )
-        )
-    }
-
-    #[test]
-    fn evaluates_trials() {
-        assert_eq!(
-            vec![
-                Evaluation::Correct(ReactionTime {
-                    microseconds: 376340992 - 373920000
-                }),
-                Evaluation::Incorrect,
-                Evaluation::Incorrect,
-                Evaluation::Correct(ReactionTime {
-                    microseconds: 35 - 12
-                }),
-            ],
-            [
-                Trial {
-                    stimulus: 1,
-                    stimulus_trigger: Trigger {
-                        time_microseconds: 373920000,
-                        code: 1
-                    },
-                    propixx_trigger: None,
-                    response: Some(Response {
-                        trigger: Trigger {
-                            time_microseconds: 376340992,
-                            code: 2
-                        },
-                        choice: Choice::Clearly(Button::One)
-                    })
-                },
-                Trial {
-                    stimulus: 1,
-                    stimulus_trigger: Trigger {
-                        time_microseconds: 377353984,
-                        code: 3
-                    },
-                    propixx_trigger: None,
-                    response: Some(Response {
-                        trigger: Trigger {
-                            time_microseconds: 378139008,
-                            code: 4
-                        },
-                        choice: Choice::Clearly(Button::Two)
-                    })
-                },
-                Trial {
-                    stimulus: 2,
-                    stimulus_trigger: Trigger {
-                        time_microseconds: 88,
-                        code: 5
-                    },
-                    propixx_trigger: None,
-                    response: None
-                },
-                Trial {
-                    stimulus: 2,
-                    stimulus_trigger: Trigger {
-                        time_microseconds: 12,
-                        code: 6
-                    },
-                    propixx_trigger: None,
-                    response: Some(Response {
-                        trigger: Trigger {
-                            time_microseconds: 35,
-                            code: 7
-                        },
-                        choice: Choice::Clearly(Button::Two)
-                    })
-                }
-            ]
-            .into_iter()
-            .map(
-                |trial| evaluate_trial(&trial, |button, &stimulus| match button {
-                    Button::One => stimulus == 1,
-                    Button::Two => stimulus == 2,
-                    Button::Three => stimulus == 3,
-                })
-            )
-            .collect::<Vec<_>>()
+            .unwrap()
         )
     }
 
@@ -1211,11 +952,20 @@ Someone put something unexpected on this line
             },
             accuracy(
                 [
-                    Evaluation::Correct(ReactionTime { microseconds: 1000 }),
+                    Evaluation::Correct(ReactionTimes {
+                        stimulus: ReactionTime { microseconds: 1000 },
+                        propixx: None
+                    }),
                     Evaluation::Incorrect,
                     Evaluation::Incorrect,
-                    Evaluation::Correct(ReactionTime { microseconds: 2000 }),
-                    Evaluation::Correct(ReactionTime { microseconds: 6000 }),
+                    Evaluation::Correct(ReactionTimes {
+                        stimulus: ReactionTime { microseconds: 2000 },
+                        propixx: None
+                    }),
+                    Evaluation::Correct(ReactionTimes {
+                        stimulus: ReactionTime { microseconds: 6000 },
+                        propixx: None
+                    }),
                 ]
                 .into_iter()
             )
@@ -1231,13 +981,23 @@ Someone put something unexpected on this line
             },
             reaction_time_stats(
                 [
-                    Evaluation::Correct(ReactionTime { microseconds: 1000 }),
+                    Evaluation::Correct(ReactionTimes {
+                        stimulus: ReactionTime { microseconds: 1000 },
+                        propixx: None
+                    }),
                     Evaluation::Incorrect,
                     Evaluation::Incorrect,
-                    Evaluation::Correct(ReactionTime { microseconds: 2000 }),
-                    Evaluation::Correct(ReactionTime { microseconds: 6000 }),
+                    Evaluation::Correct(ReactionTimes {
+                        stimulus: ReactionTime { microseconds: 2000 },
+                        propixx: None
+                    }),
+                    Evaluation::Correct(ReactionTimes {
+                        stimulus: ReactionTime { microseconds: 6000 },
+                        propixx: None
+                    }),
                 ]
-                .into_iter()
+                .into_iter(),
+                |rt| rt.stimulus
             )
         )
     }
@@ -1251,13 +1011,25 @@ Someone put something unexpected on this line
             },
             accuracy(
                 [
-                    Evaluation::Correct(ReactionTime { microseconds: 1234 }),
+                    Evaluation::Correct(ReactionTimes {
+                        stimulus: ReactionTime { microseconds: 1234 },
+                        propixx: None
+                    }),
                     Evaluation::Incorrect,
                     Evaluation::Incorrect,
-                    Evaluation::Correct(ReactionTime { microseconds: 5678 }),
-                    Evaluation::Correct(ReactionTime { microseconds: 9876 }),
+                    Evaluation::Correct(ReactionTimes {
+                        stimulus: ReactionTime { microseconds: 5678 },
+                        propixx: None
+                    }),
+                    Evaluation::Correct(ReactionTimes {
+                        stimulus: ReactionTime { microseconds: 9876 },
+                        propixx: None
+                    }),
                     Evaluation::Incorrect,
-                    Evaluation::Correct(ReactionTime { microseconds: 5432 }),
+                    Evaluation::Correct(ReactionTimes {
+                        stimulus: ReactionTime { microseconds: 5432 },
+                        propixx: None
+                    }),
                 ]
                 .into_iter()
             )
@@ -1273,15 +1045,28 @@ Someone put something unexpected on this line
             },
             reaction_time_stats(
                 [
-                    Evaluation::Correct(ReactionTime { microseconds: 1234 }),
+                    Evaluation::Correct(ReactionTimes {
+                        stimulus: ReactionTime { microseconds: 1234 },
+                        propixx: None
+                    }),
                     Evaluation::Incorrect,
                     Evaluation::Incorrect,
-                    Evaluation::Correct(ReactionTime { microseconds: 5678 }),
-                    Evaluation::Correct(ReactionTime { microseconds: 9876 }),
+                    Evaluation::Correct(ReactionTimes {
+                        stimulus: ReactionTime { microseconds: 5678 },
+                        propixx: None
+                    }),
+                    Evaluation::Correct(ReactionTimes {
+                        stimulus: ReactionTime { microseconds: 9876 },
+                        propixx: None
+                    }),
                     Evaluation::Incorrect,
-                    Evaluation::Correct(ReactionTime { microseconds: 5432 }),
+                    Evaluation::Correct(ReactionTimes {
+                        stimulus: ReactionTime { microseconds: 5432 },
+                        propixx: None
+                    }),
                 ]
-                .into_iter()
+                .into_iter(),
+                |rt| rt.stimulus
             )
         )
     }
@@ -1313,6 +1098,7 @@ Someone put something unexpected on this line
                 Evaluation::Incorrect,
             ]
             .into_iter(),
+            |rt| rt.stimulus,
         );
         assert!(stats.std_ms.is_nan());
         assert!(stats.mean_ms.is_nan());
@@ -1327,7 +1113,7 @@ Someone put something unexpected on this line
 
     #[test]
     fn calculates_rt_stats_none() {
-        let stats = reaction_time_stats([].into_iter());
+        let stats = reaction_time_stats([].into_iter(), |rt| rt.stimulus);
         assert!(stats.std_ms.is_nan());
         assert!(stats.mean_ms.is_nan());
     }
