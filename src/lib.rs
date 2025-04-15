@@ -65,6 +65,12 @@ pub struct Accuracy {
     pub count: usize,
 }
 
+#[derive(Debug, PartialEq)]
+pub struct Behavior {
+    accuracy: Accuracy,
+    rt_stats: ReactionTimeStats,
+}
+
 fn parse_triggers(input: &str) -> anyhow::Result<Vec<Trigger>> {
     input
         .lines()
@@ -257,41 +263,47 @@ fn has_bit_set(x: i32, n: usize) -> bool {
     x & (1 << n) != 0
 }
 
-pub fn accuracy<T: Iterator<Item = Evaluation> + Clone>(evaluations: T) -> Accuracy {
-    let count = evaluations
-        .clone()
-        .filter(|e| match e {
-            Evaluation::Correct(_) => true,
-            Evaluation::Incorrect => false,
-        })
-        .count();
-    let total_count = evaluations.count();
-    let percent = 100. * count as f32 / total_count as f32;
-
-    Accuracy { percent, count }
-}
-
 // f64 can represent all integers less than or equal to 2^53.
 // This includes all integer microsecond values less than 285 years.
 // You're not going to lose precision by casting a microsecond value to a f64 here.
-pub fn reaction_time_stats<T: Iterator<Item = Evaluation> + Clone, U>(
-    evaluations: T,
-    get_reaction_time: U,
-) -> ReactionTimeStats
+pub fn behavior_matching<S, P, T>(
+    trials: &[Trial<S>],
+    predicate: P,
+    to_reaction_time: T,
+) -> anyhow::Result<Behavior>
 where
-    U: Fn(&ReactionTimes) -> ReactionTime,
+    P: Fn(&S) -> bool,
+    T: Fn(&ReactionTimes) -> Option<ReactionTime>,
 {
-    let reaction_times_ms = evaluations.clone().flat_map(|e| match e {
-        Evaluation::Correct(rt) => Some(get_reaction_time(&rt).microseconds as f64 / 1000.),
-        Evaluation::Incorrect => None,
-    });
-    let rt_sum_ms = reaction_times_ms.clone().sum::<f64>();
-    let rt_count = reaction_times_ms.clone().count();
+    let filtered = trials.iter().filter(|t| predicate(&t.stimulus));
+    let reaction_times_ms = filtered
+        .clone()
+        .flat_map(|t| match &t.evaluation {
+            Evaluation::Correct(rts) => Some(
+                to_reaction_time(rts)
+                    .map(|rt| rt.microseconds as f64 / 1000.)
+                    .ok_or(anyhow::anyhow!(
+                        "missing reaction time for stimulus at {} us",
+                        t.stimulus_trigger.time_microseconds
+                    )),
+            ),
+            Evaluation::Incorrect => None,
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+
+    let correct_count = reaction_times_ms.len();
+    let rt_count = correct_count;
+
+    let total_count = filtered.count();
+    let percent = 100. * correct_count as f32 / total_count as f32;
+
+    let rt_sum_ms = reaction_times_ms.iter().sum::<f64>();
     let mean_ms = rt_sum_ms / rt_count as f64;
     //https://rust-lang-nursery.github.io/rust-cookbook/science/mathematics/statistics.html
     // MATLAB uses a normalization factor of N - 1: https://www.mathworks.com/help/matlab/ref/std.html
     let std_ms = if rt_count > 0 {
         let variance = reaction_times_ms
+            .iter()
             .map(|rt_ms| {
                 let diff = mean_ms - rt_ms;
                 diff * diff
@@ -303,7 +315,13 @@ where
         f64::NAN
     };
 
-    ReactionTimeStats { mean_ms, std_ms }
+    Ok(Behavior {
+        accuracy: Accuracy {
+            percent,
+            count: correct_count,
+        },
+        rt_stats: ReactionTimeStats { mean_ms, std_ms },
+    })
 }
 
 pub fn reaction_time_is_outlier(stats: &ReactionTimeStats, rt: &ReactionTime) -> bool {
@@ -312,10 +330,9 @@ pub fn reaction_time_is_outlier(stats: &ReactionTimeStats, rt: &ReactionTime) ->
 
 #[cfg(test)]
 mod tests {
-    use super::accuracy;
+    use super::behavior_matching;
     use super::find_trials;
     use super::parse_triggers;
-    use super::reaction_time_stats;
     use super::Accuracy;
     use super::Button;
     use super::Choice;
@@ -944,14 +961,76 @@ Someone put something unexpected on this line
     }
 
     #[test]
+    fn tbd() {
+        let trials = find_trials(
+            "Tmu         	Code	TriNo	Comnt	Ver-C
+4590000        	1	20	FIFF Trigger: 20                        
+6243000        	1	23	FIFF Trigger: 23                        
+6258000        	1	4096	FIFF Trigger: 4096                      
+7745000        	1	25	FIFF Trigger: 25                        
+10248000       	1	33	FIFF Trigger: 33                        
+10260000       	1	4096	FIFF Trigger: 4096                      
+10925000       	1	256	FIFF Trigger: 256                       
+11554000       	1	20	FIFF Trigger: 20                        
+12857000       	1	24	FIFF Trigger: 24                        
+12878000       	1	4096	FIFF Trigger: 4096                      
+14360000       	1	25	FIFF Trigger: 25                        
+16863000       	1	34	FIFF Trigger: 34                        
+16880000       	1	4096	FIFF Trigger: 4096                      
+17647000       	1	512	FIFF Trigger: 512                       
+18168000       	1	20	FIFF Trigger: 20                        
+19520000       	1	23	FIFF Trigger: 23                        
+19531000       	1	4096	FIFF Trigger: 4096                      
+21023000       	1	25	FIFF Trigger: 25                        
+23526000       	1	33	FIFF Trigger: 33                        
+23550000       	1	4096	FIFF Trigger: 4096                      
+24351000       	1	256	FIFF Trigger: 256                       
+",
+            |trigger| match trigger.code {
+                33 => Some(Button::One),
+                34 => Some(Button::Two),
+                _ => None,
+            },
+            &[Button::One, Button::Two],
+            |b, s| b == s,
+        )
+        .unwrap();
+        let behavior = behavior_matching(&trials, |_| true, |rts| rts.propixx).unwrap();
+        assert_eq!(3, trials.len());
+        assert_eq!(100., behavior.accuracy.percent);
+        assert_eq!(3, behavior.accuracy.count);
+        let rts = [24351 - 23550, 17647 - 16880, 10925 - 10260];
+        assert_eq!(
+            rts.iter().sum::<i32>() as f64 / rts.len() as f64,
+            behavior.rt_stats.mean_ms
+        );
+    }
+
+    fn trialify_evaluations(evals: impl IntoIterator<Item = Evaluation>) -> Vec<Trial<()>> {
+        evals
+            .into_iter()
+            .map(|evaluation| Trial {
+                stimulus: (),
+                stimulus_trigger: Trigger {
+                    time_microseconds: 0,
+                    code: 0,
+                },
+                propixx_trigger: None,
+                response: None,
+                evaluation,
+            })
+            .collect()
+    }
+
+    #[test]
     fn calculates_accuracy() {
         assert_eq!(
             Accuracy {
                 percent: 60.,
                 count: 3
             },
-            accuracy(
-                [
+            behavior_matching(
+                &trialify_evaluations([
                     Evaluation::Correct(ReactionTimes {
                         stimulus: ReactionTime { microseconds: 1000 },
                         propixx: None
@@ -966,9 +1045,12 @@ Someone put something unexpected on this line
                         stimulus: ReactionTime { microseconds: 6000 },
                         propixx: None
                     }),
-                ]
-                .into_iter()
+                ]),
+                |_| true,
+                |rts| Some(rts.stimulus)
             )
+            .unwrap()
+            .accuracy
         )
     }
 
@@ -979,8 +1061,8 @@ Someone put something unexpected on this line
                 mean_ms: 3.,
                 std_ms: 2.6457513110645905,
             },
-            reaction_time_stats(
-                [
+            behavior_matching(
+                &trialify_evaluations([
                     Evaluation::Correct(ReactionTimes {
                         stimulus: ReactionTime { microseconds: 1000 },
                         propixx: None
@@ -995,10 +1077,12 @@ Someone put something unexpected on this line
                         stimulus: ReactionTime { microseconds: 6000 },
                         propixx: None
                     }),
-                ]
-                .into_iter(),
-                |rt| rt.stimulus
+                ]),
+                |_| true,
+                |rt| Some(rt.stimulus)
             )
+            .unwrap()
+            .rt_stats
         )
     }
 
@@ -1009,8 +1093,8 @@ Someone put something unexpected on this line
                 percent: 57.1428571428571,
                 count: 4
             },
-            accuracy(
-                [
+            behavior_matching(
+                &trialify_evaluations([
                     Evaluation::Correct(ReactionTimes {
                         stimulus: ReactionTime { microseconds: 1234 },
                         propixx: None
@@ -1030,9 +1114,12 @@ Someone put something unexpected on this line
                         stimulus: ReactionTime { microseconds: 5432 },
                         propixx: None
                     }),
-                ]
-                .into_iter()
+                ]),
+                |_| true,
+                |rts| Some(rts.stimulus)
             )
+            .unwrap()
+            .accuracy
         )
     }
 
@@ -1043,8 +1130,8 @@ Someone put something unexpected on this line
                 mean_ms: 5.555,
                 std_ms: 3.5295108254072074,
             },
-            reaction_time_stats(
-                [
+            behavior_matching(
+                &trialify_evaluations([
                     Evaluation::Correct(ReactionTimes {
                         stimulus: ReactionTime { microseconds: 1234 },
                         propixx: None
@@ -1064,10 +1151,12 @@ Someone put something unexpected on this line
                         stimulus: ReactionTime { microseconds: 5432 },
                         propixx: None
                     }),
-                ]
-                .into_iter(),
-                |rt| rt.stimulus
+                ]),
+                |_| true,
+                |rt| Some(rt.stimulus)
             )
+            .unwrap()
+            .rt_stats
         )
     }
 
@@ -1078,42 +1167,51 @@ Someone put something unexpected on this line
                 percent: 0.,
                 count: 0
             },
-            accuracy(
-                [
+            behavior_matching(
+                &trialify_evaluations([
                     Evaluation::Incorrect,
                     Evaluation::Incorrect,
                     Evaluation::Incorrect,
-                ]
-                .into_iter()
+                ]),
+                |_| true,
+                |rts| Some(rts.stimulus)
             )
+            .unwrap()
+            .accuracy
         )
     }
 
     #[test]
     fn calculates_rt_stats_all_incorrect() {
-        let stats = reaction_time_stats(
-            [
+        let stats = behavior_matching(
+            &trialify_evaluations([
                 Evaluation::Incorrect,
                 Evaluation::Incorrect,
                 Evaluation::Incorrect,
-            ]
-            .into_iter(),
-            |rt| rt.stimulus,
-        );
+            ]),
+            |_| true,
+            |rt| Some(rt.stimulus),
+        )
+        .unwrap()
+        .rt_stats;
         assert!(stats.std_ms.is_nan());
         assert!(stats.mean_ms.is_nan());
     }
 
     #[test]
     fn calculates_accuracy_none() {
-        let acc = accuracy([].into_iter());
+        let acc = behavior_matching(&[], |_: &()| true, |rts| Some(rts.stimulus))
+            .unwrap()
+            .accuracy;
         assert!(acc.percent.is_nan());
         assert_eq!(0, acc.count);
     }
 
     #[test]
     fn calculates_rt_stats_none() {
-        let stats = reaction_time_stats([].into_iter(), |rt| rt.stimulus);
+        let stats = behavior_matching(&[], |_: &()| true, |rt| Some(rt.stimulus))
+            .unwrap()
+            .rt_stats;
         assert!(stats.std_ms.is_nan());
         assert!(stats.mean_ms.is_nan());
     }
