@@ -43,8 +43,8 @@ pub struct ReactionTime {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct ReactionTimes {
-    stimulus: ReactionTime,
-    propixx: Option<ReactionTime>,
+    pub stimulus: ReactionTime,
+    pub propixx: Option<ReactionTime>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -67,8 +67,8 @@ pub struct Accuracy {
 
 #[derive(Debug, PartialEq)]
 pub struct Behavior {
-    accuracy: Accuracy,
-    rt_stats: ReactionTimeStats,
+    pub accuracy: Accuracy,
+    pub rt_stats: ReactionTimeStats,
 }
 
 fn parse_triggers(input: &str) -> anyhow::Result<Vec<Trigger>> {
