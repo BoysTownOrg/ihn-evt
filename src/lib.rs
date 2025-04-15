@@ -961,7 +961,7 @@ Someone put something unexpected on this line
     }
 
     #[test]
-    fn tbd() {
+    fn propixx_rts() {
         let trials = find_trials(
             "Tmu         	Code	TriNo	Comnt	Ver-C
 4590000        	1	20	FIFF Trigger: 20                        
@@ -995,15 +995,226 @@ Someone put something unexpected on this line
             |b, s| b == s,
         )
         .unwrap();
+        assert_eq!(
+            vec![
+                Trial {
+                    stimulus: Button::One,
+                    stimulus_trigger: Trigger {
+                        time_microseconds: 10248000,
+                        code: 33
+                    },
+                    propixx_trigger: Some(Trigger {
+                        time_microseconds: 10260000,
+                        code: 4096
+                    }),
+                    response: Some(Response {
+                        choice: Choice::Clearly(Button::One),
+                        trigger: Trigger {
+                            time_microseconds: 10925000,
+                            code: 256
+                        }
+                    }),
+                    evaluation: Evaluation::Correct(ReactionTimes {
+                        stimulus: ReactionTime {
+                            microseconds: 10925000 - 10248000
+                        },
+                        propixx: Some(ReactionTime {
+                            microseconds: 10925000 - 10260000
+                        })
+                    })
+                },
+                Trial {
+                    stimulus: Button::Two,
+                    stimulus_trigger: Trigger {
+                        time_microseconds: 16863000,
+                        code: 34
+                    },
+                    propixx_trigger: Some(Trigger {
+                        time_microseconds: 16880000,
+                        code: 4096
+                    }),
+                    response: Some(Response {
+                        choice: Choice::Clearly(Button::Two),
+                        trigger: Trigger {
+                            time_microseconds: 17647000,
+                            code: 512
+                        }
+                    }),
+                    evaluation: Evaluation::Correct(ReactionTimes {
+                        stimulus: ReactionTime {
+                            microseconds: 17647000 - 16863000
+                        },
+                        propixx: Some(ReactionTime {
+                            microseconds: 17647000 - 16880000
+                        })
+                    })
+                },
+                Trial {
+                    stimulus: Button::One,
+                    stimulus_trigger: Trigger {
+                        time_microseconds: 23526000,
+                        code: 33
+                    },
+                    propixx_trigger: Some(Trigger {
+                        time_microseconds: 23550000,
+                        code: 4096
+                    }),
+                    response: Some(Response {
+                        choice: Choice::Clearly(Button::One),
+                        trigger: Trigger {
+                            time_microseconds: 24351000,
+                            code: 256
+                        }
+                    }),
+                    evaluation: Evaluation::Correct(ReactionTimes {
+                        stimulus: ReactionTime {
+                            microseconds: 24351000 - 23526000
+                        },
+                        propixx: Some(ReactionTime {
+                            microseconds: 24351000 - 23550000
+                        })
+                    })
+                }
+            ],
+            trials
+        );
+
         let behavior = behavior_matching(&trials, |_| true, |rts| rts.propixx).unwrap();
-        assert_eq!(3, trials.len());
         assert_eq!(100., behavior.accuracy.percent);
         assert_eq!(3, behavior.accuracy.count);
-        let rts = [24351 - 23550, 17647 - 16880, 10925 - 10260];
         assert_eq!(
-            rts.iter().sum::<i32>() as f64 / rts.len() as f64,
+            (24351 - 23550 + 17647 - 16880 + 10925 - 10260) as f64 / 3.,
             behavior.rt_stats.mean_ms
         );
+
+        let button_one_behavior =
+            behavior_matching(&trials, |s| *s == Button::One, |rts| rts.propixx).unwrap();
+        assert_eq!(100., button_one_behavior.accuracy.percent);
+        assert_eq!(2, button_one_behavior.accuracy.count);
+        assert_eq!(
+            (24351 - 23550 + 10925 - 10260) as f64 / 2.,
+            button_one_behavior.rt_stats.mean_ms
+        );
+    }
+
+    #[test]
+    fn propixx_rts_2() {
+        let trials = find_trials(
+            "Tmu         	Code	TriNo	Comnt	Ver-C
+218442000      	1	20	FIFF Trigger: 20                        
+219694000      	1	24	FIFF Trigger: 24                        
+219715008      	1	4096	FIFF Trigger: 4096                      
+221196000      	1	25	FIFF Trigger: 25                        
+223699008      	1	34	FIFF Trigger: 34                        
+223718000      	1	4096	FIFF Trigger: 4096                      
+225002000      	1	20	FIFF Trigger: 20                        
+225264000      	1	512	FIFF Trigger: 512                       
+226404000      	1	24	FIFF Trigger: 24                        
+226420000      	1	4096	FIFF Trigger: 4096                      
+227906000      	1	25	FIFF Trigger: 25                        
+230408000      	1	34	FIFF Trigger: 34                        
+230415008      	1	4096	FIFF Trigger: 4096                      
+231711008      	1	20	FIFF Trigger: 20                        
+231908992      	1	512	FIFF Trigger: 512                       
+232912992      	1	23	FIFF Trigger: 23                        
+232916992      	1	4096	FIFF Trigger: 4096                      
+234415008      	1	25	FIFF Trigger: 25                        
+236918000      	1	33	FIFF Trigger: 33                        
+236938000      	1	4096	FIFF Trigger: 4096                      
+",
+            |trigger| match trigger.code {
+                33 => Some(Button::One),
+                34 => Some(Button::Two),
+                _ => None,
+            },
+            &[Button::One, Button::Two],
+            |b, s| b == s,
+        )
+        .unwrap();
+        assert_eq!(
+            vec![
+                Trial {
+                    stimulus: Button::Two,
+                    stimulus_trigger: Trigger {
+                        time_microseconds: 223699008,
+                        code: 34
+                    },
+                    propixx_trigger: Some(Trigger {
+                        time_microseconds: 223718000,
+                        code: 4096
+                    }),
+                    response: Some(Response {
+                        choice: Choice::Clearly(Button::Two),
+                        trigger: Trigger {
+                            time_microseconds: 225264000,
+                            code: 512
+                        }
+                    }),
+                    evaluation: Evaluation::Correct(ReactionTimes {
+                        stimulus: ReactionTime {
+                            microseconds: 225264000 - 223699008
+                        },
+                        propixx: Some(ReactionTime {
+                            microseconds: 225264000 - 223718000
+                        })
+                    })
+                },
+                Trial {
+                    stimulus: Button::Two,
+                    stimulus_trigger: Trigger {
+                        time_microseconds: 230408000,
+                        code: 34
+                    },
+                    propixx_trigger: Some(Trigger {
+                        time_microseconds: 230415008,
+                        code: 4096
+                    }),
+                    response: Some(Response {
+                        choice: Choice::Clearly(Button::Two),
+                        trigger: Trigger {
+                            time_microseconds: 231908992,
+                            code: 512
+                        }
+                    }),
+                    evaluation: Evaluation::Correct(ReactionTimes {
+                        stimulus: ReactionTime {
+                            microseconds: 231908992 - 230408000
+                        },
+                        propixx: Some(ReactionTime {
+                            microseconds: 231908992 - 230415008
+                        })
+                    })
+                },
+                Trial {
+                    stimulus: Button::One,
+                    stimulus_trigger: Trigger {
+                        time_microseconds: 236918000,
+                        code: 33
+                    },
+                    propixx_trigger: Some(Trigger {
+                        time_microseconds: 236938000,
+                        code: 4096
+                    }),
+                    response: None,
+                    evaluation: Evaluation::Incorrect
+                }
+            ],
+            trials
+        );
+
+        let behavior = behavior_matching(&trials, |_| true, |rts| rts.propixx).unwrap();
+        assert_eq!(2. * 100. / 3., behavior.accuracy.percent);
+        assert_eq!(2, behavior.accuracy.count);
+        assert_eq!(
+            (231908992 - 230415008 + 225264000 - 223718000) as f64 / 1000. / 2.,
+            behavior.rt_stats.mean_ms
+        );
+
+        let button_one_behavior =
+            behavior_matching(&trials, |s| *s == Button::One, |rts| rts.propixx).unwrap();
+        assert_eq!(0., button_one_behavior.accuracy.percent);
+        assert_eq!(0, button_one_behavior.accuracy.count);
+        assert!(button_one_behavior.rt_stats.mean_ms.is_nan());
     }
 
     fn trialify_evaluations(evals: impl IntoIterator<Item = Evaluation>) -> Vec<Trial<()>> {
