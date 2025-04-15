@@ -71,7 +71,7 @@ pub struct Behavior {
     pub rt_stats: ReactionTimeStats,
 }
 
-fn parse_triggers(input: &str) -> anyhow::Result<Vec<Trigger>> {
+pub fn parse_triggers(input: &str) -> anyhow::Result<Vec<Trigger>> {
     input
         .lines()
         .enumerate()
@@ -112,7 +112,7 @@ where
 }
 
 pub fn find_trials<S, T, Q>(
-    input: &str,
+    triggers: &[Trigger],
     to_stimulus: T,
     button_choices: &[Button],
     button_is_correct: Q,
@@ -121,8 +121,7 @@ where
     T: Fn(&Trigger) -> Option<S>,
     Q: Fn(&Button, &S) -> bool,
 {
-    let triggers = parse_triggers(input)?;
-    let indexed_stimuli = find_stimulus_indices(&triggers, to_stimulus, button_choices);
+    let indexed_stimuli = find_stimulus_indices(triggers, to_stimulus, button_choices);
     let bounds: Vec<_> = indexed_stimuli
         .iter()
         .map(|(i, _)| *i)
@@ -424,7 +423,8 @@ Someone put something unexpected on this line
                 }
             ],
             find_trials(
-                "Tmu         	Code	TriNo	Comnt	Ver-C
+                &parse_triggers(
+                    "Tmu         	Code	TriNo	Comnt	Ver-C
 372508992	1	60	FIFF Trigger: 60
 372521984	1	4096	FIFF Trigger: 4096
 373920000	1	42	FIFF Trigger: 42
@@ -433,7 +433,9 @@ Someone put something unexpected on this line
 376340992	1	512	FIFF Trigger: 512
 377353984	1	42	FIFF Trigger: 42
 378139008	1	256	FIFF Trigger: 256
-",
+"
+                )
+                .unwrap(),
                 |trigger| match trigger.code {
                     42 => Some("hello"),
                     _ => None,
@@ -489,7 +491,8 @@ Someone put something unexpected on this line
                 }
             ],
             find_trials(
-                "Tmu         	Code	TriNo	Comnt	Ver-C
+                &parse_triggers(
+                    "Tmu         	Code	TriNo	Comnt	Ver-C
 6547000	1	4156	FIFF Trigger: 4156
 7700000	1	32	FIFF Trigger: 32
 7720000	1	4096	FIFF Trigger: 4096
@@ -502,7 +505,9 @@ Someone put something unexpected on this line
 14299000	1	40	FIFF Trigger: 40
 14307000	1	4136	FIFF Trigger: 4136
 15053000	1	256	FIFF Trigger: 256
-",
+"
+                )
+                .unwrap(),
                 |trigger| match trigger.code {
                     40 => Some("hello"),
                     _ => None,
@@ -558,7 +563,8 @@ Someone put something unexpected on this line
                 }
             ],
             find_trials(
-                "Tmu         	Code	TriNo	Comnt	Ver-C
+                &parse_triggers(
+                    "Tmu         	Code	TriNo	Comnt	Ver-C
 6547000	1	4156	FIFF Trigger: 4156
 7700000	1	32	FIFF Trigger: 32
 7720000	1	4096	FIFF Trigger: 4096
@@ -569,7 +575,9 @@ Someone put something unexpected on this line
 12323000	1	4096	FIFF Trigger: 4096
 14307000	1	4136	FIFF Trigger: 4136
 15053000	1	256	FIFF Trigger: 256
-",
+"
+                )
+                .unwrap(),
                 |trigger| match trigger.code {
                     40 => Some("hello"),
                     _ => None,
@@ -625,7 +633,8 @@ Someone put something unexpected on this line
                 }
             ],
             find_trials(
-                "Tmu         	Code	TriNo	Comnt	Ver-C
+                &parse_triggers(
+                    "Tmu         	Code	TriNo	Comnt	Ver-C
 6547000	1	4156	FIFF Trigger: 4156
 7700000	1	32	FIFF Trigger: 32
 7720000	1	4096	FIFF Trigger: 4096
@@ -640,7 +649,9 @@ Someone put something unexpected on this line
 14300000	1	40	FIFF Trigger: 40
 14307000	1	4136	FIFF Trigger: 4136
 15053000	1	256	FIFF Trigger: 256
-",
+"
+                )
+                .unwrap(),
                 |trigger| match trigger.code {
                     40 => Some("hello"),
                     _ => None,
@@ -696,7 +707,8 @@ Someone put something unexpected on this line
                 }
             ],
             find_trials(
-                "Tmu         	Code	TriNo	Comnt	Ver-C
+                &parse_triggers(
+                    "Tmu         	Code	TriNo	Comnt	Ver-C
 38153000	1	4146	FIFF Trigger: 4146
 39907000	1	42	FIFF Trigger: 42
 39913000	1	46	FIFF Trigger: 46
@@ -706,7 +718,9 @@ Someone put something unexpected on this line
 44202000	1	44	FIFF Trigger: 44
 44219000	1	4096	FIFF Trigger: 4096
 45812000	1	512	FIFF Trigger: 512
-",
+"
+                )
+                .unwrap(),
                 |trigger| match trigger.code {
                     42 => Some("a"),
                     44 => Some("b"),
@@ -742,13 +756,16 @@ Someone put something unexpected on this line
                 evaluation: Evaluation::Incorrect
             },],
             find_trials(
-                "Tmu         	Code	TriNo	Comnt	Ver-C
+                &parse_triggers(
+                    "Tmu         	Code	TriNo	Comnt	Ver-C
 289998016	1	4156	FIFF Trigger: 4156
 291763008	1	23	FIFF Trigger: 23
 291775008	1	4103	FIFF Trigger: 4103
 292801984	1	512	FIFF Trigger: 512
 293764992	1	4156	FIFF Trigger: 4156
-",
+"
+                )
+                .unwrap(),
                 |t| {
                     let masked = t.code & !(1 << 4);
                     match masked {
@@ -814,7 +831,8 @@ Someone put something unexpected on this line
                 }
             ],
             find_trials(
-                "Tmu         	Code	TriNo	Comnt	Ver-C
+                &parse_triggers(
+                    "Tmu         	Code	TriNo	Comnt	Ver-C
 10946000	1	4116	FIFF Trigger: 4116
 12450000	1	34	FIFF Trigger: 34
 12476000	1	4096	FIFF Trigger: 4096
@@ -823,7 +841,9 @@ Someone put something unexpected on this line
 16058000	1	41	FIFF Trigger: 41
 16070000	1	4137	FIFF Trigger: 4137
 17501000	1	256	FIFF Trigger: 256
-",
+"
+                )
+                .unwrap(),
                 |trigger| match trigger.code {
                     34 => Some("a"),
                     41 => Some("b"),
@@ -874,14 +894,17 @@ Someone put something unexpected on this line
                 }
             ],
             find_trials(
-                "Tmu         	Code	TriNo	Comnt	Ver-C
+                &parse_triggers(
+                    "Tmu         	Code	TriNo	Comnt	Ver-C
 14119000	1	11	FIFF Trigger: 11
 14126000	1	4107	FIFF Trigger: 4107
 14171000	1	4352	FIFF Trigger: 4352
 18284000	1	256	FIFF Trigger: 256
 18319000	1	267	FIFF Trigger: 267
 18330000	1	4363	FIFF Trigger: 4363
-",
+"
+                )
+                .unwrap(),
                 |trigger| match trigger.code {
                     11 => Some("a"),
                     _ => None,
@@ -937,7 +960,8 @@ Someone put something unexpected on this line
                 }
             ],
             find_trials(
-                "Tmu         	Code	TriNo	Comnt	Ver-C
+                &parse_triggers(
+                    "Tmu         	Code	TriNo	Comnt	Ver-C
 64516000	1	11	FIFF Trigger: 11
 64521000	1	267	FIFF Trigger: 267
 64527000	1	4363	FIFF Trigger: 4363
@@ -945,7 +969,9 @@ Someone put something unexpected on this line
 68716000	1	267	FIFF Trigger: 267
 68730000	1	4352	FIFF Trigger: 4352
 72906000	1	256	FIFF Trigger: 256
-",
+"
+                )
+                .unwrap(),
                 |trigger| match trigger.code {
                     11 => Some("a"),
                     _ => None,
@@ -960,7 +986,8 @@ Someone put something unexpected on this line
     #[test]
     fn propixx_rts() {
         let trials = find_trials(
-            "Tmu         	Code	TriNo	Comnt	Ver-C
+            &parse_triggers(
+                "Tmu         	Code	TriNo	Comnt	Ver-C
 4590000        	1	20	FIFF Trigger: 20                        
 6243000        	1	23	FIFF Trigger: 23                        
 6258000        	1	4096	FIFF Trigger: 4096                      
@@ -983,6 +1010,8 @@ Someone put something unexpected on this line
 23550000       	1	4096	FIFF Trigger: 4096                      
 24351000       	1	256	FIFF Trigger: 256                       
 ",
+            )
+            .unwrap(),
             |trigger| match trigger.code {
                 33 => Some(Button::One),
                 34 => Some(Button::Two),
@@ -1097,7 +1126,8 @@ Someone put something unexpected on this line
     #[test]
     fn propixx_rts_2() {
         let trials = find_trials(
-            "Tmu         	Code	TriNo	Comnt	Ver-C
+            &parse_triggers(
+                "Tmu         	Code	TriNo	Comnt	Ver-C
 218442000      	1	20	FIFF Trigger: 20                        
 219694000      	1	24	FIFF Trigger: 24                        
 219715008      	1	4096	FIFF Trigger: 4096                      
@@ -1119,6 +1149,8 @@ Someone put something unexpected on this line
 236918000      	1	33	FIFF Trigger: 33                        
 236938000      	1	4096	FIFF Trigger: 4096                      
 ",
+            )
+            .unwrap(),
             |trigger| match trigger.code {
                 33 => Some(Button::One),
                 34 => Some(Button::Two),
