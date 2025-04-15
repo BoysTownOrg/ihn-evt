@@ -290,26 +290,20 @@ where
             Evaluation::Incorrect => None,
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
-
     let correct_count = reaction_times_ms.len();
-    let rt_count = correct_count;
-
-    let total_count = filtered.count();
-    let percent = 100. * correct_count as f32 / total_count as f32;
-
-    let rt_sum_ms = reaction_times_ms.iter().sum::<f64>();
-    let mean_ms = rt_sum_ms / rt_count as f64;
+    let correct_percent = 100. * correct_count as f32 / filtered.count() as f32;
+    let rt_mean_ms = reaction_times_ms.iter().sum::<f64>() / correct_count as f64;
     //https://rust-lang-nursery.github.io/rust-cookbook/science/mathematics/statistics.html
     // MATLAB uses a normalization factor of N - 1: https://www.mathworks.com/help/matlab/ref/std.html
-    let std_ms = if rt_count > 0 {
+    let rt_std_ms = if correct_count > 0 {
         let variance = reaction_times_ms
             .iter()
             .map(|rt_ms| {
-                let diff = mean_ms - rt_ms;
+                let diff = rt_mean_ms - rt_ms;
                 diff * diff
             })
             .sum::<f64>()
-            / (rt_count - 1) as f64;
+            / (correct_count - 1) as f64;
         variance.sqrt()
     } else {
         f64::NAN
@@ -317,10 +311,13 @@ where
 
     Ok(Behavior {
         accuracy: Accuracy {
-            percent,
+            percent: correct_percent,
             count: correct_count,
         },
-        rt_stats: ReactionTimeStats { mean_ms, std_ms },
+        rt_stats: ReactionTimeStats {
+            mean_ms: rt_mean_ms,
+            std_ms: rt_std_ms,
+        },
     })
 }
 
@@ -1425,5 +1422,30 @@ Someone put something unexpected on this line
             .rt_stats;
         assert!(stats.std_ms.is_nan());
         assert!(stats.mean_ms.is_nan());
+    }
+
+    #[test]
+    fn missing_propixx_rt() {
+        let behavior = behavior_matching(
+            &trialify_evaluations([
+                Evaluation::Correct(ReactionTimes {
+                    stimulus: ReactionTime { microseconds: 1000 },
+                    propixx: Some(ReactionTime { microseconds: 1000 }),
+                }),
+                Evaluation::Incorrect,
+                Evaluation::Incorrect,
+                Evaluation::Correct(ReactionTimes {
+                    stimulus: ReactionTime { microseconds: 2000 },
+                    propixx: None,
+                }),
+                Evaluation::Correct(ReactionTimes {
+                    stimulus: ReactionTime { microseconds: 6000 },
+                    propixx: Some(ReactionTime { microseconds: 6000 }),
+                }),
+            ]),
+            |_| true,
+            |rt| rt.propixx,
+        );
+        assert!(behavior.is_err());
     }
 }
